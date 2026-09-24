@@ -43,6 +43,7 @@ import {
 import { handleSearchItems } from './handlers/items.js';
 import { handleCreateJournalEntry } from './handlers/journal-mutations.js';
 import { handleGetJournal, handleSearchJournals } from './handlers/journals.js';
+import { handleCompareParty, handleFindInParty } from './handlers/party.js';
 import { handleReadResource } from './handlers/resources.js';
 import {
   handleGetSceneImage,
@@ -120,6 +121,16 @@ export async function routeToolRequest(
       );
     case 'get_party_overview':
       return handleGetPartyOverview(args, foundryClient);
+    case 'find_in_party':
+      return handleFindInParty(
+        args as { query?: string; type?: string; scope?: string; include_unassigned?: boolean },
+        foundryClient,
+      );
+    case 'compare_party':
+      return handleCompareParty(
+        args as { stat?: string; scope?: string; include_unassigned?: boolean },
+        foundryClient,
+      );
 
     // Actor mutation tools (#143) — WRITE via the Socket.IO modifyDocument
     // protocol (foundryClient); require FOUNDRY_WRITE_ENABLED=true + a GM user.

@@ -139,6 +139,56 @@ export const actorTools = [
       properties: {},
     },
   },
+  {
+    name: 'find_in_party',
+    description:
+      'Find which characters have a spell, feature or item, by name substring, with quantity, equipped/attuned state, uses left, and spell preparation. Use when: asked "who has Counterspell?", "who is carrying healing potions?", "does anyone have a rope?". scope="party" (default) searches player characters, scope="all" searches every actor including NPCs; include_unassigned adds characters with no player. type narrows to spell, feat, weapon, equipment, consumable, tool, loot or container. Do not use when: you want everything one character owns (use get_actor_items).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Name (or part of a name) to look for' },
+        type: { type: 'string', description: 'Optional item type filter' },
+        scope: {
+          type: 'string',
+          enum: ['party', 'all'],
+          description: 'Who to search',
+          default: 'party',
+        },
+        include_unassigned: {
+          type: 'boolean',
+          description: 'Include characters with no assigned player',
+          default: false,
+        },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'compare_party',
+    description:
+      'Rank the party by one stat, effect-adjusted where effects are numeric. stat options: hp (most hurt first), ac, initiative, speed, level, proficiency, spell_dc, spell_attack, passive_perception, passive_investigation, passive_insight, ability:<str|dex|con|int|wis|cha>, save:<ability>, skill:<name> (e.g. skill:stealth, skill:sleight of hand). Use when: asked who is best at something, who is hurt, who has the highest AC, or who to send to scout. Do not use when: you want one character in full (use get_actor_details).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        stat: {
+          type: 'string',
+          description: 'Stat to rank by, e.g. "hp", "ac", "skill:stealth", "save:wis"',
+        },
+        scope: {
+          type: 'string',
+          enum: ['party', 'all'],
+          description: 'Who to include',
+          default: 'party',
+        },
+        include_unassigned: {
+          type: 'boolean',
+          description: 'Include characters with no assigned player',
+          default: false,
+        },
+      },
+      required: ['stat'],
+    },
+  },
 ];
 
 /**

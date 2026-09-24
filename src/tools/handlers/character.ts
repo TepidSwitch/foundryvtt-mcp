@@ -34,6 +34,7 @@ import {
   toNum,
   truncate,
 } from './dnd5e.js';
+import { buildEffectiveSheet, type EffectiveSheet, type EffectSummary } from './effects.js';
 import { withToolError } from './utils.js';
 
 const ID_PATTERN = /^[a-zA-Z0-9]{16}$/;
@@ -125,6 +126,13 @@ function ownerNameOf(foundryClient: FoundryClient, actor: WorldActor): string | 
   const users = foundryClient.getWorldSnapshot()?.users ?? [];
   const owner = users.find((u) => u.character === actor._id);
   return owner ? owner.name : null;
+}
+
+function caveatFor(fx: EffectSummary | null): string {
+  if (!fx) {
+    return CAVEAT;
+  }
+  return `_Computed from the raw world data with numeric active-effect changes applied. Dice and formula bonuses (Bless, Bardic Inspiration, "+1d4"), roll modifiers, and bonuses that are not effects (e.g. Tough) are not included, and only equipped armor counts toward AC.${fx.unresolved > 0 ? ` ${fx.unresolved} effect changes could not be evaluated.` : ''}_`;
 }
 
 // ---------------------------------------------------------------------------
@@ -278,6 +286,31 @@ export function formatSheet(
     }
   }
 
+  // Hit dice, death saves, active effects
+  if (!isNpc) {
+    const dice = sheet.classes
+      .filter((c) => c.hitDie > 0)
+      .map((c) => `${Math.max(c.levels - c.hdSpent, 0)}/${c.levels} d${c.hitDie}`);
+    if (dice.length > 0) {
+      lines.push(`**Hit dice** ${dice.join(', ')}`);
+    }
+    if (hp.value === 0) {
+      const death = at(sys, 'attributes', 'death');
+      lines.push(
+        `**Death saves** ${num(at(death, 'success'))} successes · ${num(at(death, 'failure'))} failures`,
+      );
+    }
+  }
+  const fx = 'effects' in sheet ? (sheet as EffectiveSheet).effects : null;
+  if (fx) {
+    if (fx.current.length > 0) {
+      lines.push(`**Active effects** ${fx.current.map((e) => e.name).join(' · ')}`);
+    }
+    if (fx.applied.length > 0) {
+      lines.push(`**Effect bonuses applied** ${fx.applied.join('; ')}`);
+    }
+  }
+
   // Resources / misc
   if (!isNpc) {
     const cur = at(sys, 'currency');
@@ -302,13 +335,15 @@ export function formatSheet(
   }
   lines.push('');
   lines.push(
-    CAVEAT + (hp.source === 'computed' ? ' HP marked * is computed from class hit dice.' : ''),
+    caveatFor(fx) +
+      (hp.source === 'computed' ? ' HP marked * is computed from class hit dice.' : ''),
   );
   return lines.join('\n');
 }
 
 export function sheetFor(foundryClient: FoundryClient, actor: WorldActor): string {
-  return formatSheet(actor, buildSheet(actor), ownerNameOf(foundryClient, actor));
+  const effective = buildEffectiveSheet(actor);
+  return formatSheet(effective.actor, effective, ownerNameOf(foundryClient, actor));
 }
 
 /** One-line class/level or CR label used in search results. */
@@ -637,12 +672,13 @@ export async function handleGetPartyOverview(
     const assigned = new Set(players.map((u) => u.character));
 
     const row = (actor: WorldActor, player: string | null) => {
-      const s = buildSheet(actor);
+      const s = buildEffectiveSheet(actor);
+      const notes = s.effects.current.map((e) => e.name);
       const cls = s.classes.map((c) => `${c.name} ${c.levels}`).join('/') || 'no class';
       const hp = s.hp.max === null ? `${s.hp.value}/?` : `${s.hp.value}/${s.hp.max}`;
       const spell = s.spellcasting.dc ? ` · DC ${s.spellcasting.dc}` : '';
       const passive = (k: string) => s.skills.find((x) => x.key === k)?.passive ?? 10;
-      return `- **${actor.name}**${player ? ` (${player})` : ''} — ${cls} · HP ${hp}${s.hp.temp ? `+${s.hp.temp}` : ''} · AC ${s.ac.value ?? '?'} · PP ${passive('prc')}/Inv ${passive('inv')}/Ins ${passive('ins')}${spell} · \`${actor._id}\``;
+      return `- **${actor.name}**${player ? ` (${player})` : ''} — ${cls} · HP ${hp}${s.hp.temp ? `+${s.hp.temp}` : ''} · AC ${s.ac.value ?? '?'} · PP ${passive('prc')}/Inv ${passive('inv')}/Ins ${passive('ins')}${spell}${notes.length > 0 ? ` · ⚠ ${notes.join(', ')}` : ''} · \`${actor._id}\``;
     };
 
     const lines: string[] = [];

@@ -147,6 +147,8 @@ export interface ClassInfo {
   levels: number;
   subclass: string | null;
   hitDie: number;
+  /** Hit dice already spent (class `hd.spent`). */
+  hdSpent: number;
   progression: string;
   ability: string;
   item: WorldItem;
@@ -181,6 +183,7 @@ export function classesOf(actor: WorldActor): ClassInfo[] {
         levels: num(sys.levels, 1),
         subclass: sub ? sub.name : null,
         hitDie: parseDie(denom),
+        hdSpent: num(isRec(hd) ? hd.spent : 0),
         progression,
         ability:
           str(at(sys, 'spellcasting', 'ability')) ||
@@ -270,6 +273,15 @@ export function computeAc(actor: WorldActor, mods: Record<AbilityKey, number>): 
     const info = computeAcForCalc(actor, calc, mods);
     if (!best || (info.value ?? -1) > (best.value ?? -1)) {
       best = info;
+    }
+  }
+  if (best && best.value !== null) {
+    // `ac.bonus` is a formula string in the source; only plain numbers are evaluated.
+    const raw = at(ac, 'bonus');
+    const text = typeof raw === 'string' ? raw.trim() : '';
+    const bonus = typeof raw === 'number' ? raw : /^[+-]?\d+$/.test(text) ? Number(text) : 0;
+    if (bonus !== 0) {
+      best = { value: best.value + bonus, detail: `${best.detail} ${signed(bonus)} bonus` };
     }
   }
   return best ?? { value: null, detail: 'unknown' };

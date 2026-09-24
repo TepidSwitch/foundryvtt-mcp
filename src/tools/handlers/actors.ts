@@ -7,7 +7,7 @@
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
 import { actorLabel, resolveActor, sheetFor } from './character.js';
-import { buildSheet } from './dnd5e.js';
+import { buildEffectiveSheet } from './effects.js';
 import { withToolError } from './utils.js';
 
 /**
@@ -39,7 +39,7 @@ export async function handleSearchActors(
         // HP): the snapshot stores neither, so the mapped actor shows "Unknown".
         const raw = foundryClient.getRawActor?.(actor._id);
         if (raw) {
-          const sheet = buildSheet(raw);
+          const sheet = buildEffectiveSheet(raw);
           const hp =
             sheet.hp.max === null ? `${sheet.hp.value}/?` : `${sheet.hp.value}/${sheet.hp.max}`;
           return `- **${actor.name}** (${actor.type}) - ${actorLabel(raw)} - HP: ${hp} - id \`${actor._id}\``;
