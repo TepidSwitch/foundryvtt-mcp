@@ -200,12 +200,16 @@ describe('authenticateFoundry — warn-and-continue (CN-7 analogue)', () => {
     });
     expect(mockAxios.post).toHaveBeenCalledWith(
       'http://example.com/join',
+      // Foundry v14 expects camelCase `userId` (lowercase `userid` → 401 ErrorUserDoesNotExist).
       expect.objectContaining({
         action: 'join',
-        userid: 'abc123DEF456ghij',
+        userId: 'abc123DEF456ghij',
         password: 'pw',
       }),
-      expect.any(Object),
+      // ...and rejects a /join POST with no Origin header (generic HTTP 400).
+      expect.objectContaining({
+        headers: expect.objectContaining({ Origin: 'http://example.com' }),
+      }),
     );
   });
 

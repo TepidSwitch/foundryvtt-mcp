@@ -163,13 +163,16 @@ export async function authenticateFoundry(
     `${baseUrl}/join`,
     {
       action: 'join',
-      userid: userId,
+      userId: userId,
       password,
     },
     {
       headers: {
         'Content-Type': 'application/json',
         Cookie: `session=${session}`,
+        // Foundry v14 rejects /join POSTs that lack an Origin header (generic
+        // HTTP 400 "The request could not be processed.") as CSRF protection.
+        Origin: new URL(baseUrl).origin,
       },
       // Accept 200 (success JSON), 302 (redirect to /game on success) and 401
       // (bad password). 401 carries FoundryVTT's own explanation in the body;
