@@ -170,6 +170,43 @@ function describeTable(doc: Rec): string {
     .join('\n')}`;
 }
 
+/**
+ * Resolves a compendium entry id from an explicit id or a name (exact match
+ * first, then substring). Throws with the candidates when a name is ambiguous.
+ */
+export async function resolveEntryId(
+  foundryClient: FoundryClient,
+  compendiumId: string,
+  documentId: string | undefined,
+  name: string | undefined,
+): Promise<string> {
+  if (documentId) {
+    return documentId;
+  }
+  if (!name) {
+    throw new McpError(ErrorCode.InvalidParams, 'Provide documentId or name');
+  }
+  const index = await foundryClient.getPackIndex(compendiumId);
+  const lower = name.toLowerCase();
+  const exact = index.filter((d) => str(d.name).toLowerCase() === lower);
+  const partial = index.filter((d) => str(d.name).toLowerCase().includes(lower));
+  const pool = exact.length > 0 ? exact : partial;
+  if (pool.length === 0) {
+    throw new McpError(ErrorCode.InvalidParams, `No entry named "${name}" in ${compendiumId}`);
+  }
+  if (pool.length > 1) {
+    const list = pool
+      .slice(0, 10)
+      .map((d) => `${str(d.name)} (${str(d._id)})`)
+      .join('; ');
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `"${name}" matches ${pool.length} entries — pass documentId: ${list}`,
+    );
+  }
+  return str(pool[0]?._id);
+}
+
 export async function handleGetCompendiumDocument(
   args: { compendiumId?: string; documentId?: string; name?: string },
   foundryClient: FoundryClient,
@@ -185,29 +222,8 @@ export async function handleGetCompendiumDocument(
     throw new McpError(ErrorCode.InvalidParams, 'Provide documentId or name');
   }
   return withToolError('get compendium document', async () => {
-    let id = documentId;
-    if (!id && name) {
-      const index = await foundryClient.getPackIndex(compendiumId);
-      const lower = name.toLowerCase();
-      const exact = index.filter((d) => str(d.name).toLowerCase() === lower);
-      const partial = index.filter((d) => str(d.name).toLowerCase().includes(lower));
-      const pool = exact.length > 0 ? exact : partial;
-      if (pool.length === 0) {
-        throw new McpError(ErrorCode.InvalidParams, `No entry named "${name}" in ${compendiumId}`);
-      }
-      if (pool.length > 1) {
-        const list = pool
-          .slice(0, 10)
-          .map((d) => `${str(d.name)} (${str(d._id)})`)
-          .join('; ');
-        throw new McpError(
-          ErrorCode.InvalidParams,
-          `"${name}" matches ${pool.length} entries — pass documentId: ${list}`,
-        );
-      }
-      id = str(pool[0]?._id);
-    }
-    const doc = await foundryClient.getCompendiumDocument(compendiumId, id as string);
+    const id = await resolveEntryId(foundryClient, compendiumId, documentId, name);
+    const doc = await foundryClient.getCompendiumDocument(compendiumId, id);
     const packType = str(foundryClient.listPacks().find((p) => p.id === compendiumId)?.type);
     const type = str(doc.type);
 

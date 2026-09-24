@@ -35,6 +35,7 @@ import {
 // Import all tool handlers
 import { handleRollDice } from './handlers/dice.js';
 import { handleGenerateLoot, handleGenerateNPC, handleLookupRule } from './handlers/generation.js';
+import { handleImportFromCompendium, handlePlaceActorOnScene } from './handlers/import-place.js';
 import {
   handleCreateActorItem,
   handleDeleteActorItem,
@@ -216,6 +217,34 @@ export async function routeToolRequest(
       return handleSuggestScenes(args, foundryClient);
     case 'get_scene_image':
       return handleGetSceneImage(args as { scene?: string; full?: boolean }, foundryClient);
+
+    // Additive writes (WRITE — require FOUNDRY_WRITE_ENABLED=true): create only
+    case 'import_from_compendium':
+      return handleImportFromCompendium(
+        args as {
+          compendiumId?: string;
+          documentId?: string;
+          name?: string;
+          actor?: string;
+          folder?: string;
+          new_name?: string;
+        },
+        foundryClient,
+      );
+    case 'place_actor_on_scene':
+      return handlePlaceActorOnScene(
+        args as {
+          scene?: string;
+          actor?: string;
+          x?: number;
+          y?: number;
+          count?: number;
+          hidden?: boolean;
+          disposition?: string;
+          name?: string;
+        },
+        foundryClient,
+      );
 
     // Compendium documents, roll tables and world browsing (read-only)
     case 'get_compendium_document':

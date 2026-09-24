@@ -346,15 +346,110 @@ describe('FoundryClient item mutations (modifyDocument)', () => {
     });
   });
 
-  it('rejects a compendium-source create over Socket.IO', async () => {
+  it('applies its own write to the cached world (Foundry never echoes it back)', async () => {
     const client = buildClient();
-    await expect(
-      client.createActorItem(VALID_ACTOR_ID, {
+    const cached = { _id: VALID_ACTOR_ID, name: 'Hero', type: 'character', system: {}, items: [] };
+    (client as unknown as { worldData: unknown }).worldData = { actors: [cached], scenes: [] };
+
+    await client.createActorItem(VALID_ACTOR_ID, {
+      type: 'inline',
+      item: { ...sampleItem, _id: VALID_ITEM_ID },
+    });
+
+    // the echoed ack carries the created item, which must now be in the cache
+    expect(cached.items).toHaveLength(1);
+    expect((cached.items[0] as { _id: string })._id).toBe(VALID_ITEM_ID);
+  });
+
+  describe('compendium-source create', () => {
+    const PACK_ID = 'dnd5e.spells';
+    const ENTRY_ID = 'phbsplCounterspe';
+
+    /** A client whose socket answers compendium reads and creates like Foundry. */
+    const buildCompendiumClient = () => {
+      const client = new FoundryClient({ baseUrl: 'http://localhost:30000', writeEnabled: true });
+      (client as unknown as { worldData: unknown }).worldData = {
+        packs: [{ id: PACK_ID, type: 'Item', index: [] }],
+        actors: [],
+        scenes: [],
+      };
+      const emit = vi.fn(((_event, payload, cb) => {
+        const req = payload as {
+          action: string;
+          operation: { data?: unknown[]; query?: { _id?: string } };
+        };
+        if (req.action === 'get') {
+          cb({
+            result: [
+              { _id: req.operation.query?._id, name: 'Counterspell', type: 'spell', sort: 5 },
+            ],
+          });
+        } else {
+          cb({ result: [{ ...(req.operation.data?.[0] as object), _id: 'newitemnewitem01' }] });
+        }
+      }) as SocketEmitMock);
+      (client as unknown as { socket: { connected: boolean; emit: SocketEmitMock } }).socket = {
+        connected: true,
+        emit,
+      };
+      return { client, emit };
+    };
+
+    it('reads the entry from the pack and creates a copy on the actor', async () => {
+      const { client, emit } = buildCompendiumClient();
+      const created = await client.createActorItem(VALID_ACTOR_ID, {
         type: 'compendium',
-        compendiumId: 'dnd5e.spells',
-        itemId: VALID_ITEM_ID,
-      }),
-    ).rejects.toThrow(/compendium source is not yet supported/);
+        compendiumId: PACK_ID,
+        itemId: ENTRY_ID,
+      });
+
+      expect(emit).toHaveBeenCalledTimes(2);
+      const [getReq, createReq] = emit.mock.calls.map((c) => c[1]) as Array<{
+        type: string;
+        action: string;
+        operation: Record<string, unknown>;
+      }>;
+      expect(getReq).toMatchObject({
+        type: 'Item',
+        action: 'get',
+        operation: { pack: PACK_ID, query: { _id: ENTRY_ID } },
+      });
+      expect(createReq).toMatchObject({
+        type: 'Item',
+        action: 'create',
+        operation: { parentUuid: `Actor.${VALID_ACTOR_ID}` },
+      });
+      const data = (createReq.operation.data as Array<Record<string, unknown>>)[0] ?? {};
+      expect(data.name).toBe('Counterspell');
+      expect('_id' in data).toBe(false);
+      expect('sort' in data).toBe(false);
+      expect('folder' in data).toBe(false);
+      expect(data._stats).toEqual({ compendiumSource: `Compendium.${PACK_ID}.Item.${ENTRY_ID}` });
+      expect((created as unknown as { _id: string })._id).toBe('newitemnewitem01');
+    });
+
+    it('rejects an unknown compendium pack without writing', async () => {
+      const { client, emit } = buildCompendiumClient();
+      await expect(
+        client.createActorItem(VALID_ACTOR_ID, {
+          type: 'compendium',
+          compendiumId: 'no.such.pack',
+          itemId: ENTRY_ID,
+        }),
+      ).rejects.toThrow(/Unknown compendium pack/);
+      expect(emit).not.toHaveBeenCalled();
+    });
+
+    it('is still refused when writes are disabled', async () => {
+      const client = new FoundryClient({ baseUrl: 'http://localhost:30000', writeEnabled: false });
+      await expect(
+        client.createActorItem(VALID_ACTOR_ID, {
+          type: 'compendium',
+          compendiumId: PACK_ID,
+          itemId: ENTRY_ID,
+        }),
+      ).rejects.toThrow(/Write operations are disabled/);
+    });
   });
 
   it('updates an item with a nested system merge patch', async () => {

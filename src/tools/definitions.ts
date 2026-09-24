@@ -325,6 +325,30 @@ export const compendiumTools = [
  */
 export const itemMutationTools = [
   {
+    name: 'import_from_compendium',
+    description:
+      'Copy a compendium entry into the world as a NEW document: a monster or character becomes a world Actor, an item becomes a world Item (or, with actor set, is added to that actor), and a map becomes a world Scene (never made active). Also works for journal entries and roll tables. Find compendiumId and the entry with search_compendium; pass documentId or an exact name. folder places a top-level import in an existing world folder of the matching type (folders are not created). new_name renames the copy. Only creates - nothing existing is modified, and importing twice makes two copies (the result says so). Use when: bringing an SRD/DDB monster, spell, item or a map into the world, or giving a character a spell or item from a pack. Do not use when: the document is already in the world. ' +
+      WRITE_GATE,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        compendiumId: { type: 'string', description: 'Pack id, e.g. "dnd5e.actors24"' },
+        documentId: { type: 'string', description: 'Entry id from search_compendium' },
+        name: { type: 'string', description: 'Entry name, used when documentId is omitted' },
+        actor: {
+          type: 'string',
+          description: 'Item packs only: actor (id, name or player name) to add the item to',
+        },
+        folder: {
+          type: 'string',
+          description: 'Existing world folder (id or name) for a top-level import',
+        },
+        new_name: { type: 'string', description: 'Name for the imported copy' },
+      },
+      required: ['compendiumId'],
+    },
+  },
+  {
     name: 'create_actor_item',
     description:
       'Create an item on an actor from an inline item document (type, name, system). Use when: adding a new weapon, spell, feature, or piece of equipment to a known actorId. Do not use when: editing an item the actor already owns - use update_actor_item. Replacing an item is not atomic: create the replacement first and delete the old one second, so a mid-sequence failure leaves the actor with a duplicate rather than nothing. Compendium-source create is not yet supported over Socket.IO (see issue #159). Canonical target: D&D 5e v4+ activity schema. ' +
@@ -339,13 +363,12 @@ export const itemMutationTools = [
         source: {
           type: 'object',
           description:
-            'Item source. Use { type: "inline", item: { type, name, system } } to create the item directly. The { type: "compendium", compendiumId, itemId } shape is accepted by the schema but rejected at call time - compendium-source create is not yet supported over Socket.IO.',
+            'Item source. Use { type: "inline", item: { type, name, system } } to create the item directly. Use { type: "compendium", compendiumId, itemId } to copy an entry from a compendium pack onto the actor (find ids with search_compendium).',
           properties: {
             type: {
               type: 'string',
               enum: ['compendium', 'inline'],
-              description:
-                'Source kind. Only "inline" is functional today; "compendium" is rejected at call time.',
+              description: 'Source kind: "inline" or "compendium".',
             },
             compendiumId: {
               type: 'string',
@@ -821,6 +844,34 @@ export const combatMutationTools = [
  * user needs GM/owner permission.
  */
 export const tokenMutationTools = [
+  {
+    name: 'place_actor_on_scene',
+    description:
+      "Place one or more tokens of a world actor on a scene, using the actor's prototype token. x and y are grid squares counted from the top-left of the map image (0,0); omit both to place at the centre. count (1-20) places several in a row, wrapping at the map edge, and numbers their names. Set hidden=true to place them invisible to players (do this on the active scene unless you want players to see them at once); disposition is hostile, neutral or friendly. Only creates tokens - nothing existing is moved or changed. Use when: staging an encounter or adding a creature or NPC to a map. Do not use when: moving an existing token (use move_token). " +
+      WRITE_GATE,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scene: { type: 'string', description: 'Scene id or name (partial ok)' },
+        actor: {
+          type: 'string',
+          description:
+            'World actor id or name (import it first with import_from_compendium if needed)',
+        },
+        x: { type: 'number', description: 'Grid column from the left of the map image (0-based)' },
+        y: { type: 'number', description: 'Grid row from the top of the map image (0-based)' },
+        count: { type: 'number', description: 'How many tokens to place (1-20)', default: 1 },
+        hidden: { type: 'boolean', description: 'Place hidden from players' },
+        disposition: {
+          type: 'string',
+          enum: ['hostile', 'neutral', 'friendly'],
+          description: 'Override the token disposition',
+        },
+        name: { type: 'string', description: 'Override the token name' },
+      },
+      required: ['scene', 'actor'],
+    },
+  },
   {
     name: 'move_token',
     description:

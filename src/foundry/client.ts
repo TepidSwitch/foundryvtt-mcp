@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { logger } from '../utils/logger.js';
 import { authenticateFoundry, sessionSocketOptions } from './auth.js';
 import { evaluateDiceFormula } from './dice-formula.js';
+import { buildTokenData, cleanForImport } from './import.js';
 import type {
   ActorAttributeUpdateResult,
   ActorItemCreateSource,
@@ -1114,7 +1115,30 @@ export class FoundryClient {
         `FoundryVTT rejected ${action} ${type}: ${response.error.message || 'unknown error'}`,
       );
     }
-    return Array.isArray(response?.result) ? response.result : [];
+    const result = Array.isArray(response?.result) ? response.result : [];
+
+    // FoundryVTT broadcasts a change to every OTHER client, never back to the one
+    // that made it, so without this our own writes would leave the cached world
+    // stale (a just-created actor missing, an updated HP still showing the old
+    // value). Applying is idempotent, so it is harmless if a setup does echo it.
+    if (this.worldData) {
+      try {
+        const parentUuid = operation.parentUuid;
+        applyDocumentBroadcast(this.worldData, {
+          type,
+          action,
+          result,
+          ...(typeof parentUuid === 'string' && parentUuid ? { parentUuid } : {}),
+        });
+      } catch (error) {
+        logger.warn('Failed to apply own write to cached worldData', {
+          type,
+          action,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return result;
   }
 
   // ==========================================================================
@@ -1124,12 +1148,12 @@ export class FoundryClient {
   /**
    * Creates a new item on an actor via the `modifyDocument` socket protocol.
    *
-   * Inline sources are created directly. Compendium sources are NOT yet
-   * supported over Socket.IO — copying a pack entry needs a compendium read
-   * that `modifyDocument` does not provide (tracked in issue #159).
+   * Inline sources are created directly. Compendium sources are read over the
+   * socket (`modifyDocument` with `action: 'get'` and `operation.pack`, see
+   * {@link getCompendiumDocument}) and copied onto the actor.
    *
    * @param actorId - 16-char alphanumeric actor document id
-   * @param source - inline item document (compendium source throws)
+   * @param source - inline item document, or a compendium pack + entry id
    * @returns the newly created item document
    */
   async createActorItem(actorId: string, source: ActorItemCreateSource): Promise<FoundryItem> {
@@ -1138,16 +1162,111 @@ export class FoundryClient {
       throw new Error(`Invalid actorId format: ${actorId}`);
     }
     if (source.type === 'compendium') {
-      throw new Error(
-        'Creating an item from a compendium source is not yet supported over Socket.IO; ' +
-          'provide an inline item instead. See issue #159.',
-      );
+      const created = await this.importCompendiumDocument(source.compendiumId, source.itemId, {
+        actorId,
+      });
+      return created.document as unknown as FoundryItem;
     }
     const result = await this.modifyDocument('Item', 'create', {
       data: [source.item],
       parentUuid: `Actor.${actorId}`,
     });
     return result[0] as FoundryItem;
+  }
+
+  // ==========================================================================
+  // Additive world writes (WRITE — Socket.IO modifyDocument): create only
+  // ==========================================================================
+
+  /**
+   * Copies a compendium document into the world as a NEW document: a monster or
+   * character becomes a world Actor, an item a world Item (or, with `actorId`,
+   * an item on that actor), and a map a world Scene. Nothing existing is
+   * modified. The new document carries its compendium origin in `_stats`.
+   */
+  async importCompendiumDocument(
+    packId: string,
+    documentId: string,
+    options: { name?: string; folder?: string | null; actorId?: string } = {},
+  ): Promise<{ type: string; id: string; name: string; document: Record<string, unknown> }> {
+    this.assertWriteable();
+    const pack = this.findPack(packId);
+    if (!pack) {
+      throw new Error(`Unknown compendium pack: ${packId}`);
+    }
+    const packType = String(pack.type);
+    if (options.actorId !== undefined) {
+      if (!FOUNDRY_ID_PATTERN.test(options.actorId)) {
+        throw new Error(`Invalid actorId format: ${options.actorId}`);
+      }
+      if (packType !== 'Item') {
+        throw new Error(
+          `Only Item compendium entries can be added to an actor (this pack holds ${packType})`,
+        );
+      }
+    }
+    const source = await this.getCompendiumDocument(packId, documentId);
+    const data = cleanForImport(source, {
+      packId,
+      packType,
+      documentId,
+      embedded: options.actorId !== undefined,
+      ...(options.name ? { name: options.name } : {}),
+      ...(options.folder !== undefined ? { folder: options.folder } : {}),
+    });
+    const result = await this.modifyDocument(packType, 'create', {
+      data: [data],
+      ...(options.actorId !== undefined ? { parentUuid: `Actor.${options.actorId}` } : {}),
+    });
+    const created = result[0];
+    if (!isRecord(created)) {
+      throw new Error('FoundryVTT did not return the created document');
+    }
+    return {
+      type: packType,
+      id: String(created._id ?? ''),
+      name: String(created.name ?? data.name ?? ''),
+      document: created,
+    };
+  }
+
+  /**
+   * Places tokens for a world actor on a scene. `positions` are canvas pixels.
+   * Token data comes from the actor's prototype token. Creates only.
+   */
+  async createSceneTokens(
+    sceneId: string,
+    actorId: string,
+    tokens: Array<{ x: number; y: number; name?: string; hidden?: boolean; disposition?: number }>,
+  ): Promise<Array<{ id: string; name: string; x: number; y: number }>> {
+    this.assertWriteable();
+    if (!FOUNDRY_ID_PATTERN.test(sceneId)) {
+      throw new Error(`Invalid sceneId format: ${sceneId}`);
+    }
+    if (!FOUNDRY_ID_PATTERN.test(actorId)) {
+      throw new Error(`Invalid actorId format: ${actorId}`);
+    }
+    const actor = this.worldData?.actors.find((a) => a._id === actorId);
+    if (!actor) {
+      throw new Error(`Actor not found in the world: ${actorId}`);
+    }
+    if (!this.worldData?.scenes.some((s) => s._id === sceneId)) {
+      throw new Error(`Scene not found in the world: ${sceneId}`);
+    }
+    if (tokens.length === 0 || tokens.length > 50) {
+      throw new Error('Place between 1 and 50 tokens at a time');
+    }
+    const data = tokens.map((t) => buildTokenData(actorId, actor.prototypeToken, t));
+    const result = await this.modifyDocument('Token', 'create', {
+      data,
+      parentUuid: `Scene.${sceneId}`,
+    });
+    return result.filter(isRecord).map((t) => ({
+      id: String(t._id ?? ''),
+      name: String(t.name ?? ''),
+      x: Number(t.x ?? 0),
+      y: Number(t.y ?? 0),
+    }));
   }
 
   /**
