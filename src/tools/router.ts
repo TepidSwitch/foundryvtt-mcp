@@ -15,6 +15,7 @@ import { logger } from '../utils/logger.js';
 import type { ToolContext, ToolResult } from './base.js';
 import { handleUpdateActorAttribute } from './handlers/actor-mutations.js';
 import { handleGetActorDetails, handleSearchActors } from './handlers/actors.js';
+import { handleGetActorItems, handleGetPartyOverview } from './handlers/character.js';
 import { handleGetChatMessages } from './handlers/chat.js';
 import { handleGetCombatState } from './handlers/combat.js';
 import {
@@ -43,7 +44,12 @@ import { handleSearchItems } from './handlers/items.js';
 import { handleCreateJournalEntry } from './handlers/journal-mutations.js';
 import { handleGetJournal, handleSearchJournals } from './handlers/journals.js';
 import { handleReadResource } from './handlers/resources.js';
-import { handleGetSceneInfo } from './handlers/scenes.js';
+import {
+  handleGetSceneImage,
+  handleGetSceneInfo,
+  handleSearchScenes,
+  handleSuggestScenes,
+} from './handlers/scenes.js';
 import { handleApplyStatusEffect, handleMoveToken } from './handlers/token-mutations.js';
 import { handleGetUsers } from './handlers/users.js';
 import {
@@ -51,6 +57,11 @@ import {
   handleRefreshWorldData,
   handleSearchWorld,
 } from './handlers/world.js';
+import {
+  handleBrowseWorld,
+  handleGetCompendiumDocument,
+  handleGetRollTable,
+} from './handlers/world-browse.js';
 import { toolRegistry } from './registry.js';
 
 /**
@@ -98,10 +109,17 @@ export async function routeToolRequest(
     case 'search_actors':
       return handleSearchActors(args, foundryClient);
     case 'get_actor_details':
-      if (!('actorId' in args) || typeof args.actorId !== 'string') {
-        throw new Error('Missing required parameter: actorId');
+      if (typeof args.actor !== 'string' && typeof args.actorId !== 'string') {
+        throw new Error('Missing required parameter: actor (id, name, or player name)');
       }
-      return handleGetActorDetails(args as { actorId: string }, foundryClient);
+      return handleGetActorDetails(args as { actor?: string; actorId?: string }, foundryClient);
+    case 'get_actor_items':
+      return handleGetActorItems(
+        args as { actor?: string; type?: string; query?: string; details?: boolean },
+        foundryClient,
+      );
+    case 'get_party_overview':
+      return handleGetPartyOverview(args, foundryClient);
 
     // Actor mutation tools (#143) — WRITE via the Socket.IO modifyDocument
     // protocol (foundryClient); require FOUNDRY_WRITE_ENABLED=true + a GM user.
@@ -180,7 +198,30 @@ export async function routeToolRequest(
 
     // Scene tools
     case 'get_scene_info':
-      return handleGetSceneInfo(args, foundryClient);
+      return handleGetSceneInfo(args as { sceneId?: string; name?: string }, foundryClient);
+    case 'search_scenes':
+      return handleSearchScenes(args, foundryClient);
+    case 'suggest_scenes':
+      return handleSuggestScenes(args, foundryClient);
+    case 'get_scene_image':
+      return handleGetSceneImage(args as { scene?: string; full?: boolean }, foundryClient);
+
+    // Compendium documents, roll tables and world browsing (read-only)
+    case 'get_compendium_document':
+      return handleGetCompendiumDocument(
+        args as { compendiumId?: string; documentId?: string; name?: string },
+        foundryClient,
+      );
+    case 'get_roll_table':
+      return handleGetRollTable(
+        args as { table?: string; compendiumId?: string; roll?: boolean },
+        foundryClient,
+      );
+    case 'browse_world':
+      return handleBrowseWorld(
+        args as { kind?: string; query?: string; folder_type?: string; limit?: number },
+        foundryClient,
+      );
 
     // Combat tools
     case 'get_combat_state':

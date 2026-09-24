@@ -15,6 +15,7 @@ import type {
   ActorAttributeUpdateResult,
   ActorItemCreateSource,
   ActorSearchResult,
+  CompendiumSearchEntry,
   CompendiumSearchResult,
   DiceRoll,
   DocumentVisibility,
@@ -843,7 +844,200 @@ export class FoundryClient {
         };
       });
     }
+    if (this.worldData) {
+      return this.searchCompendiumIndex(params, limit, offset);
+    }
     return { results: [], total: 0, page: 1, limit, restAvailable: false, nextCursor: null };
+  }
+
+  // ==========================================================================
+  // Compendium reads over Socket.IO (no REST module needed)
+  //
+  // FoundryVTT's own client reads compendium documents with the same
+  // `modifyDocument` socket event using `action: 'get'` and `operation.pack`.
+  // Verified against v14.368 + dnd5e 5.3.3: `query: {}` + `index: true` returns
+  // the pack index and `query: {_id}` returns the full document.
+  // ==========================================================================
+
+  private packIndexCache = new Map<string, Array<Record<string, unknown>>>();
+
+  /** Read-only view of the cached world snapshot (null until connected). */
+  getWorldSnapshot(): WorldData | null {
+    return this.worldData;
+  }
+
+  private findPack(packId: string): Record<string, unknown> | undefined {
+    return this.worldData?.packs.find((p) => p.id === packId);
+  }
+
+  /** Lists compendium packs with document type, owning package and entry count. */
+  listPacks(): Array<{
+    id: string;
+    label: string;
+    type: string;
+    packageName: string;
+    count: number | null;
+  }> {
+    return (this.worldData?.packs ?? []).map((p) => ({
+      id: String(p.id),
+      label: String(p.label ?? p.name ?? p.id),
+      type: String(p.type ?? ''),
+      packageName: String(p.packageName ?? ''),
+      count: Array.isArray(p.index) && p.index.length > 0 ? p.index.length : null,
+    }));
+  }
+
+  /**
+   * Returns a pack's index (`_id`, `name`, `type`, `img`, `folder`, …). Uses the
+   * copy in the world snapshot when present, otherwise fetches it over the
+   * socket once and caches it.
+   */
+  async getPackIndex(packId: string): Promise<Array<Record<string, unknown>>> {
+    const pack = this.findPack(packId);
+    if (!pack) {
+      throw new Error(`Unknown compendium pack: ${packId}`);
+    }
+    if (Array.isArray(pack.index) && pack.index.length > 0) {
+      return pack.index as Array<Record<string, unknown>>;
+    }
+    const cached = this.packIndexCache.get(packId);
+    if (cached) {
+      return cached;
+    }
+    const response = await this.emitWithAck<DocumentSocketResponse>('modifyDocument', {
+      type: String(pack.type),
+      action: 'get',
+      operation: { pack: packId, query: {}, index: true, broadcast: false },
+    });
+    if (response?.error) {
+      throw new Error(
+        `FoundryVTT rejected pack index read: ${response.error.message || 'unknown error'}`,
+      );
+    }
+    const index = (Array.isArray(response?.result) ? response.result : []) as Array<
+      Record<string, unknown>
+    >;
+    this.packIndexCache.set(packId, index);
+    return index;
+  }
+
+  /** Reads one full document from a compendium pack (read-only). */
+  async getCompendiumDocument(
+    packId: string,
+    documentId: string,
+  ): Promise<Record<string, unknown>> {
+    const pack = this.findPack(packId);
+    if (!pack) {
+      throw new Error(`Unknown compendium pack: ${packId}`);
+    }
+    // Pack document ids are usually 16 chars but system packs may use shorter/longer ids.
+    if (!/^[a-zA-Z0-9]{1,32}$/.test(documentId)) {
+      throw new Error(`Invalid document id format: ${documentId}`);
+    }
+    const response = await this.emitWithAck<DocumentSocketResponse>('modifyDocument', {
+      type: String(pack.type),
+      action: 'get',
+      operation: { pack: packId, query: { _id: documentId }, broadcast: false },
+    });
+    if (response?.error) {
+      throw new Error(
+        `FoundryVTT rejected compendium read: ${response.error.message || 'unknown error'}`,
+      );
+    }
+    const doc = Array.isArray(response?.result) ? response.result[0] : undefined;
+    if (!isRecord(doc)) {
+      throw new Error(`Document ${documentId} not found in ${packId}`);
+    }
+    return doc;
+  }
+
+  private async searchCompendiumIndex(
+    params: CompendiumSearchParams,
+    limit: number,
+    offset: number,
+  ): Promise<CompendiumSearchResult> {
+    const q = (params.query ?? '').toLowerCase().trim();
+    const typeFilter = params.packType?.toLowerCase();
+    const itemType = params.itemType?.toLowerCase();
+    const packs = (this.worldData?.packs ?? []).filter((p) => {
+      if (params.compendiumId && p.id !== params.compendiumId) {
+        return false;
+      }
+      return !typeFilter || String(p.type).toLowerCase() === typeFilter;
+    });
+
+    const hits: Array<{ rank: number; entry: CompendiumSearchEntry }> = [];
+    for (const pack of packs) {
+      // A pack whose index isn't in the snapshot is only fetched when the caller
+      // named it explicitly; sweeping every empty pack would be slow.
+      const inSnapshot = Array.isArray(pack.index) && pack.index.length > 0;
+      if (!inSnapshot && !params.compendiumId) {
+        continue;
+      }
+      const index = await this.getPackIndex(String(pack.id));
+      for (const doc of index) {
+        const name = String(doc.name ?? '');
+        const lower = name.toLowerCase();
+        if (q && !lower.includes(q)) {
+          continue;
+        }
+        const type = String(doc.type ?? pack.type ?? '');
+        if (itemType && type.toLowerCase() !== itemType) {
+          continue;
+        }
+        const rank = !q ? 3 : lower === q ? 0 : lower.startsWith(q) ? 1 : 2;
+        const entry: CompendiumSearchEntry = {
+          compendiumId: String(pack.id),
+          itemId: String(doc._id ?? ''),
+          name,
+          type,
+        };
+        if (typeof doc.img === 'string') {
+          entry.img = doc.img;
+        }
+        hits.push({ rank, entry });
+      }
+    }
+    hits.sort((a, b) => a.rank - b.rank || a.entry.name.localeCompare(b.entry.name));
+    const total = hits.length;
+    const results = hits.slice(offset, offset + limit).map((h) => h.entry);
+    const nextOffset = offset + results.length;
+    return {
+      results,
+      total,
+      page: Math.floor(offset / limit) + 1,
+      limit,
+      restAvailable: true,
+      nextCursor: nextOffset < total ? encodeCursor(nextOffset) : null,
+    };
+  }
+
+  /**
+   * Fetches a static file (scene thumbnail/background, token art) served by
+   * FoundryVTT. Rejects anything larger than `maxBytes` and any cross-origin URL.
+   */
+  async fetchAsset(
+    assetPath: string,
+    maxBytes: number,
+  ): Promise<{ data: Buffer; mimeType: string }> {
+    const base = this.config.baseUrl.replace(/\/+$/, '');
+    const url = /^https?:\/\//i.test(assetPath)
+      ? assetPath
+      : `${base}/${assetPath.replace(/^\/+/, '')}`;
+    if (new URL(url).origin !== new URL(base).origin) {
+      throw new Error(
+        'Refusing to fetch an asset from a different origin than the FoundryVTT server',
+      );
+    }
+    const response = await axios.get<ArrayBuffer>(url, {
+      responseType: 'arraybuffer',
+      maxContentLength: maxBytes,
+      timeout: this.config.timeout || 10000,
+    });
+    const mimeType = String(response.headers['content-type'] ?? 'application/octet-stream').split(
+      ';',
+    )[0];
+    return { data: Buffer.from(response.data), mimeType: mimeType ?? 'application/octet-stream' };
   }
 
   // ==========================================================================

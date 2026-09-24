@@ -6,6 +6,8 @@
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
+import { actorLabel, resolveActor, sheetFor } from './character.js';
+import { buildSheet } from './dnd5e.js';
 import { withToolError } from './utils.js';
 
 /**
@@ -32,10 +34,18 @@ export async function handleSearchActors(
     const result = await foundryClient.searchActors(searchParams);
 
     const actorList = result.actors
-      .map(
-        (actor) =>
-          `- **${actor.name}** (${actor.type}) - Level ${actor.level || 'Unknown'} - HP: ${actor.hp?.value || 'Unknown'}/${actor.hp?.max || 'Unknown'}`,
-      )
+      .map((actor) => {
+        // Prefer values derived from the raw world data (class levels, computed max
+        // HP): the snapshot stores neither, so the mapped actor shows "Unknown".
+        const raw = foundryClient.getRawActor?.(actor._id);
+        if (raw) {
+          const sheet = buildSheet(raw);
+          const hp =
+            sheet.hp.max === null ? `${sheet.hp.value}/?` : `${sheet.hp.value}/${sheet.hp.max}`;
+          return `- **${actor.name}** (${actor.type}) - ${actorLabel(raw)} - HP: ${hp} - id \`${actor._id}\``;
+        }
+        return `- **${actor.name}** (${actor.type}) - Level ${actor.level || 'Unknown'} - HP: ${actor.hp?.value || 'Unknown'}/${actor.hp?.max || 'Unknown'} - id \`${actor._id}\``;
+      })
       .join('\n');
 
     return {
@@ -61,17 +71,26 @@ ${actorList || 'No actors found matching the criteria.'}
  */
 export async function handleGetActorDetails(
   args: {
-    actorId: string;
+    actorId?: string;
+    actor?: string;
   },
   foundryClient: FoundryClient,
 ) {
-  const { actorId } = args;
+  const actorId = args.actor ?? args.actorId;
 
   if (!actorId || typeof actorId !== 'string') {
     throw new McpError(ErrorCode.InvalidParams, 'Actor ID is required and must be a string');
   }
 
   return withToolError('get actor details', async () => {
+    // Socket.IO mode: full computed sheet from the world snapshot. Accepts an id,
+    // a name, or a player's name.
+    if (foundryClient.getWorldSnapshot?.()) {
+      const resolved = resolveActor(foundryClient, actorId);
+      return { content: [{ type: 'text', text: sheetFor(foundryClient, resolved) }] };
+    }
+
+    // REST mode fallback: the module's actor summary.
     const actor = await foundryClient.getActor(actorId);
 
     const abilities = actor.abilities

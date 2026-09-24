@@ -64,7 +64,7 @@ export const actorTools = [
   {
     name: 'search_actors',
     description:
-      "Search actors (player characters, NPCs) by name, optionally filtered by type. Returns a summary line per match: name, type, level and current/max HP. Use when: checking whether an actor exists, or getting a quick roster with HP. Do not use when: you already have the actorId and want that actor's ability scores - use get_actor_details; or you need the actorId itself, which this tool does not print - read the foundry://actors resource, whose JSON lists up to the first 100 actors with their _id (not exhaustive in larger worlds).",
+      'Search actors (player characters, NPCs) by name, optionally filtered by type. Returns one line per match: name, type, class and level (or CR for NPCs), current/max HP (max is computed from class hit dice when the world stores none) and the actor id. Use when: finding an actor or getting a quick roster with ids. Do not use when: you want a full sheet (use get_actor_details), the party at a glance (use get_party_overview), or what an actor carries (use get_actor_items).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -87,16 +87,56 @@ export const actorTools = [
   {
     name: 'get_actor_details',
     description:
-      'Get details for one actor by id: type, level, current/max HP, AC and ability scores; no biography or description text is returned (the description line always reads "No description available."). Use when: you have an actorId and need its current HP or ability scores - notably as the read-before-write step for update_actor_attributes. Do not use when: you only have a name - run search_actors first; or you need the ids of items the actor owns, which this tool does not return (no tool in this server lists owned-item ids - ask the user for the itemId).',
+      "Get the full computed sheet for one actor: class/level (or CR), race, background, HP (current/max/temp), AC and how it is derived, initiative, speed, proficiency bonus, ability scores with modifiers and saves, trained skills with totals, passive Perception/Investigation/Insight, senses, languages, resistances, proficiencies, spellcasting (ability, save DC, attack bonus, spell slots used/max), currency and player name. Values are derived from raw world data (dnd5e stores no computed sheet values); active-effect and magic-item bonuses are not applied. Accepts an actor id, an actor name, or a player's name (returns their character). Use when: asked about any character or monster's stats, or as the read-before-write step for update_actor_attributes. Do not use when: you want the spell list, features or inventory (use get_actor_items) or the whole party (use get_party_overview).",
     inputSchema: {
       type: 'object',
       properties: {
+        actor: {
+          type: 'string',
+          description: "Actor id, actor name (partial ok), or a player's name",
+        },
         actorId: {
           type: 'string',
-          description: 'The ID of the actor to retrieve',
+          description: 'Alias for actor (an actor id)',
         },
       },
-      required: ['actorId'],
+    },
+  },
+  {
+    name: 'get_actor_items',
+    description:
+      'List everything an actor owns, with item ids: spells grouped by level (school, casting time, range, duration, components, concentration/ritual, preparation state, uses), class features and feats, weapons, equipment, consumables, tools, loot and containers (quantity, equipped, attunement, damage). Use when: asked for a character\'s spell list, features, attacks, inventory or gear, or when you need an itemId for update_actor_item/delete_actor_item. Filter with type ("spell", "feat", "weapon", "equipment", "consumable", "tool", "loot", "container", "class", "subclass", "race", "background", or "inventory" for all gear) and/or query (name substring). Set details=true to include description text and damage/save activities. Accepts an actor id, name, or player name.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        actor: {
+          type: 'string',
+          description: "Actor id, actor name (partial ok), or a player's name",
+        },
+        type: {
+          type: 'string',
+          description: 'Item type filter, or "inventory" for all gear',
+        },
+        query: {
+          type: 'string',
+          description: 'Only items whose name contains this text',
+        },
+        details: {
+          type: 'boolean',
+          description: 'Include descriptions and activity summaries (longer output)',
+          default: false,
+        },
+      },
+      required: ['actor'],
+    },
+  },
+  {
+    name: 'get_party_overview',
+    description:
+      "One-screen summary of every player character: player name, class and level, HP, AC, passive Perception/Investigation/Insight, spell save DC and actor id, plus average party level and any characters with no assigned player. Use when: planning encounters, checking who is hurt, or asking about 'the party'. Do not use when: you need one character's full sheet (use get_actor_details).",
+    inputSchema: {
+      type: 'object',
+      properties: {},
     },
   },
 ];
@@ -176,7 +216,7 @@ export const compendiumTools = [
   {
     name: 'search_compendium',
     description:
-      'Search FoundryVTT compendium packs by name and metadata; searches all enabled packs unless compendiumId scopes it to one pack. Use when: looking up spells, monsters, or equipment that are not yet present in the world. Do not use when: the document already exists in the world - use search_items or search_world. Requires the REST API module (FOUNDRY_API_KEY); without it the search returns no results instead of failing.',
+      'Search FoundryVTT compendium packs by name (SRD spells/monsters/items/rules, DDB imports, map packs, roll tables); searches all packs unless compendiumId scopes it to one. Returns pack id and entry id per hit - pass them to get_compendium_document to read the full entry. Works over the normal Socket.IO login; packType (Item, Actor, Scene, JournalEntry, RollTable) and itemType (spell, weapon, feat, npc...) filters work everywhere, while spellLevel and source filters only apply when the REST API module is configured. Use when: looking up spells, monsters, equipment or maps not yet in the world. Do not use when: the document already exists in the world - use search_items or search_world. See browse_world kind="packs" for the pack list.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -304,7 +344,7 @@ export const itemMutationTools = [
   {
     name: 'delete_actor_item',
     description:
-      "Permanently remove an item owned by an actor. Use when: the user explicitly asks to delete or discard a specific owned item, and has given you the itemId - no tool in this server lists owned-item ids, so never guess one. Do not use when: only the item's data needs to change - use update_actor_item. In a replacement or migration flow, run create_actor_item first and this second: the two calls are not atomic, and failing after the delete loses the item. Echo the actorId and itemId back to the user and get their confirmation before calling. " +
+      "Permanently remove an item owned by an actor. Use when: the user explicitly asks to delete or discard a specific owned item, and has given you the itemId - get the id from get_actor_items, and never guess one. Do not use when: only the item's data needs to change - use update_actor_item. In a replacement or migration flow, run create_actor_item first and this second: the two calls are not atomic, and failing after the delete loses the item. Echo the actorId and itemId back to the user and get their confirmation before calling. " +
       CONFIRM_FIRST +
       ' ' +
       WRITE_GATE,
@@ -332,15 +372,134 @@ export const sceneTools = [
   {
     name: 'get_scene_info',
     description:
-      "Get details of the active scene, or of a specific scene by id: name, scene id, active/navigation flags, pixel dimensions, padding and lighting (global light, darkness); no description text is returned unless a module has set a description flag on the scene (the description line otherwise reads 'No description available.'). Use when: you need the sceneId or the scene's pixel extents. Do not use when: looking a scene up by name (use search_world), or you need grid size or token coordinates - this tool returns neither.",
+      'Full detail for one scene: folder, size in grid squares and pixels, grid, lighting/darkness/weather, counts of walls/lights/tokens/notes/tiles/regions/sounds, linked journal and playlist, every token (name, disposition, position), the map-note labels, tags inferred from the name/folder, and a prep-readiness score. Accepts a scene id or name; with neither it returns the active scene. Use when: you need what is on a scene, who is on the map, or the sceneId. Do not use when: browsing many scenes (use search_scenes) or looking at the map (use get_scene_image).',
     inputSchema: {
       type: 'object',
       properties: {
         sceneId: {
           type: 'string',
-          description: 'Optional scene ID. If not provided, returns current scene',
+          description: 'Scene id. If neither sceneId nor name is given, returns the active scene',
+        },
+        name: {
+          type: 'string',
+          description: 'Scene name (partial ok)',
         },
       },
+    },
+  },
+  {
+    name: 'search_scenes',
+    description:
+      'List and filter every scene in the world with folder path, size in grid squares, wall/light/token/note counts and inferred tags (dungeon, social, wilderness, urban, nautical, set-piece). Use when: finding a scene by name or folder, or seeing what maps exist. Filters: query (all words must match name/folder/tags), folder, active_only, min_tokens, has_walls, has_lights, has_notes. Do not use when: you want the best scenes for a session (use suggest_scenes).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Words to match against scene name, folder and tags',
+        },
+        folder: { type: 'string', description: 'Folder path substring' },
+        active_only: { type: 'boolean', description: 'Only the active scene' },
+        min_tokens: { type: 'number', description: 'Minimum number of placed tokens' },
+        has_walls: { type: 'boolean', description: 'Only scenes with walls' },
+        has_lights: { type: 'boolean', description: 'Only scenes with lights' },
+        has_notes: { type: 'boolean', description: 'Only scenes with map notes' },
+        limit: { type: 'number', description: 'Maximum results', default: 25 },
+      },
+    },
+  },
+  {
+    name: 'suggest_scenes',
+    description:
+      'Rank scenes by how ready they are to run: walls, lighting, pre-placed tokens (with hostile names), map notes, linked journal, audio, tiles/regions and playable size, each contributing to a 0-100 readiness score with the reasons listed. Optionally bias by theme keywords (e.g. "temple, tomb") and purpose (combat, exploration, social). include_compendium=true also lists matching not-yet-imported maps from compendium packs (by name only). This is a metadata heuristic - it cannot see how a map looks; call get_scene_image on the top picks. Use when: choosing a map for the next session or encounter.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        theme: {
+          type: 'string',
+          description: 'Comma/space separated keywords, e.g. "temple, dragon"',
+        },
+        purpose: {
+          type: 'string',
+          enum: ['combat', 'exploration', 'social', 'any'],
+          description: 'What the scene is for',
+          default: 'any',
+        },
+        min_readiness: { type: 'number', description: 'Only scenes scoring at least this (0-100)' },
+        limit: { type: 'number', description: 'Maximum results', default: 10 },
+        include_compendium: {
+          type: 'boolean',
+          description: 'Also list matching maps from compendium scene packs (needs theme)',
+          default: false,
+        },
+      },
+    },
+  },
+  {
+    name: 'get_scene_image',
+    description:
+      'Return the scene map as an image so it can be looked at (thumbnail by default; full=true fetches the full background when it is under ~1.5 MB, otherwise falls back to the thumbnail). Accepts a scene id or name. Use when: judging whether a map suits an encounter, or describing a location to players.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scene: { type: 'string', description: 'Scene id or name (partial ok)' },
+        full: {
+          type: 'boolean',
+          description: 'Fetch the full-size map if small enough',
+          default: false,
+        },
+      },
+      required: ['scene'],
+    },
+  },
+  {
+    name: 'get_compendium_document',
+    description:
+      'Read one full entry from a compendium pack: spells (level, school, casting time, range, components, damage, description), monsters (full stat block, attacks, features, lore), items (rarity, price, attunement, description), journal entries (page text) and roll tables. Get compendiumId and the entry id or exact name from search_compendium. Use when: you need the rules text for a spell/monster/item that is not on any actor, or want to prep an encounter from the SRD or DDB imports.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        compendiumId: { type: 'string', description: 'Pack id, e.g. "dnd5e.spells24"' },
+        documentId: { type: 'string', description: 'Entry id from search_compendium' },
+        name: { type: 'string', description: 'Entry name (used when documentId is omitted)' },
+      },
+      required: ['compendiumId'],
+    },
+  },
+  {
+    name: 'get_roll_table',
+    description:
+      'Read a roll table from the world, or from a compendium pack when compendiumId is given, listing every result row. Set roll=true to roll it locally and show the matching row (the roll is not posted to Foundry chat). Use when: you need random encounters, loot, wild magic effects or similar.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        table: { type: 'string', description: 'Table name or id' },
+        compendiumId: { type: 'string', description: 'Pack id when the table is in a compendium' },
+        roll: { type: 'boolean', description: 'Roll on the table', default: false },
+      },
+      required: ['table'],
+    },
+  },
+  {
+    name: 'browse_world',
+    description:
+      'List world content that has no dedicated tool: playlists (with tracks), macros, roll tables, installed modules, folders (optionally by folder_type such as Scene or Actor) and compendium packs (with entry counts). Use when: asking what audio, macros, modules or compendiums exist, or looking up a pack id for search_compendium.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        kind: {
+          type: 'string',
+          enum: ['playlists', 'macros', 'tables', 'modules', 'folders', 'packs'],
+          description: 'What to list',
+        },
+        query: { type: 'string', description: 'Only rows containing this text' },
+        folder_type: {
+          type: 'string',
+          description: 'For kind=folders: Scene, Actor, JournalEntry, Macro',
+        },
+        limit: { type: 'number', description: 'Maximum rows', default: 60 },
+      },
+      required: ['kind'],
     },
   },
 ];

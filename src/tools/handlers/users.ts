@@ -18,11 +18,18 @@ export async function handleGetUsers(_args: Record<string, unknown>, foundryClie
     const { users, activeUsers } = foundryClient.getUsers();
     const activeSet = new Set(activeUsers);
 
+    const actors = foundryClient.getWorldSnapshot?.()?.actors ?? [];
     const formatted = users
       .map((u) => {
         const online = activeSet.has(u._id) ? 'Online' : 'Offline';
         const role = ROLE_NAMES[u.role] || `Role ${u.role}`;
-        return `- **${u.name}** (${role}) — ${online}`;
+        const character = u.character ? actors.find((a) => a._id === u.character) : undefined;
+        const played = character
+          ? ` — plays **${character.name}** (\`${character._id}\`)`
+          : u.character
+            ? ` — character id \`${u.character}\``
+            : '';
+        return `- **${u.name}** (${role}) — ${online} — id \`${u._id}\`${played}`;
       })
       .join('\n');
 
