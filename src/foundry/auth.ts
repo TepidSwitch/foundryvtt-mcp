@@ -46,6 +46,14 @@ async function getSessionCookie(baseUrl: string): Promise<string> {
 
   const cookies = res.headers['set-cookie'];
   if (!cookies) {
+    // Hosts like Molten answer a stopped instance with a 302 to their lobby
+    // (status=NOT_RUNNING) instead of Foundry's join page.
+    const location = String(res.headers.location ?? '');
+    if (/status=NOT_RUNNING/i.test(location)) {
+      throw new Error(
+        `Foundry server is not running (host redirected /join to ${new URL(location).origin} with status=NOT_RUNNING)`,
+      );
+    }
     throw new Error('No session cookie returned from /join');
   }
 

@@ -323,3 +323,19 @@ describe('authenticateFoundry — rejected /join is reported, not thrown raw (#2
     ).rejects.toThrow('FoundryVTT authentication failed (HTTP 200): You may not join this world');
   });
 });
+
+describe('stopped hosted instance', () => {
+  it('reports NOT_RUNNING redirects as a stopped server, not a missing cookie', async () => {
+    mockAxios.get = vi.fn().mockResolvedValue({
+      status: 302,
+      headers: {
+        location:
+          'https://manage.moltenhosting.com/lobby?status=NOT_RUNNING&server=x&host=x.moltenhosting.com',
+      },
+      data: '',
+    });
+    await expect(authenticateFoundry('https://x.moltenhosting.com', 'GM', 'pw')).rejects.toThrow(
+      /Foundry server is not running/,
+    );
+  });
+});

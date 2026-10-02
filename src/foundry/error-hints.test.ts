@@ -16,6 +16,12 @@ describe('explainConnectionError', () => {
     ).toContain('Origin');
     expect(explainConnectionError('connect ECONNREFUSED 1.2.3.4:443')).toContain('FOUNDRY_URL');
   });
+  it('explains a stopped hosted instance', () => {
+    const out = explainConnectionError(
+      'Foundry server is not running (host redirected /join to https://manage.x with status=NOT_RUNNING)',
+    );
+    expect(out).toContain('hosting dashboard');
+  });
   it('passes unknown errors through unchanged', () => {
     expect(explainConnectionError('weird')).toBe('weird');
   });

@@ -5,6 +5,10 @@
 
 const HINTS: Array<[RegExp, string]> = [
   [
+    /not running|NOT_RUNNING/i,
+    'The Foundry instance is stopped (hosts like Molten shut idle servers down). Start it from your hosting dashboard; the connection will be retried automatically and succeed once it is up.',
+  ],
+  [
     /JOIN\.ErrorUserDoesNotExist/i,
     'Foundry could not match the user. Check FOUNDRY_USERNAME (it is the display name, case-sensitive). On Foundry v14 this also appears if the join request used the wrong id key.',
   ],
