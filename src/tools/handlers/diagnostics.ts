@@ -385,7 +385,7 @@ export async function handleGetHealthStatus(
   return withToolError('get health status', async () => {
     const [worldInfo, systemHealth] = await Promise.all([
       foundryClient.getWorldInfo().catch(() => null),
-      diagnosticsClient.getSystemHealth().catch(() => null),
+      foundryClient.hasRestApi() ? diagnosticsClient.getSystemHealth().catch(() => null) : null,
     ]);
 
     const worldLines = worldInfo
@@ -399,7 +399,9 @@ export async function handleGetHealthStatus(
       worldLines.unshift(STALE_WORLD_DATA_NOTICE);
     }
 
-    let healthSection = 'ℹ️ Not available';
+    let healthSection = foundryClient.hasRestApi()
+      ? 'ℹ️ Not available'
+      : 'ℹ️ Not available (needs the Foundry REST API module / FOUNDRY_API_KEY)';
     if (systemHealth) {
       const healthLines = [
         `- **Status:** ${systemHealth.status}`,

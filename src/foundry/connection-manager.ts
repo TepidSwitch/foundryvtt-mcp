@@ -9,6 +9,7 @@
  */
 
 import { logger } from '../utils/logger.js';
+import { explainConnectionError } from './error-hints.js';
 
 export interface ConnectableClient {
   connect(): Promise<void>;
@@ -122,16 +123,22 @@ export class ConnectionManager {
 
   private async loop(): Promise<void> {
     this.attempts = 0;
+    const startedAt = Date.now();
     while (!this.client.isConnected()) {
       this.attempts += 1;
       try {
         await this.client.connect();
         this.lastError = null;
         this.fatal = null;
-        logger.info('Connected to FoundryVTT', { attempts: this.attempts });
+        logger.info('Connected to FoundryVTT', {
+          attempts: this.attempts,
+          durationMs: Date.now() - startedAt,
+        });
         return;
       } catch (error) {
-        this.lastError = error instanceof Error ? error.message : String(error);
+        this.lastError = explainConnectionError(
+          error instanceof Error ? error.message : String(error),
+        );
         if (isPermanentAuthError(error)) {
           this.fatal = `Login rejected: ${this.lastError}. Check FOUNDRY_USERNAME / FOUNDRY_PASSWORD.`;
           logger.error(this.fatal);

@@ -95,7 +95,8 @@ class Logger {
    */
   debug(message: string, meta?: unknown): void {
     if (this.shouldLog('debug')) {
-      console.debug(this.formatMessage('debug', message, meta));
+      // stdout carries the MCP JSON-RPC stream; every log level goes to stderr.
+      console.error(this.formatMessage('debug', message, meta));
     }
   }
 
@@ -114,7 +115,7 @@ class Logger {
    */
   info(message: string, meta?: unknown): void {
     if (this.shouldLog('info')) {
-      console.info(this.formatMessage('info', message, meta));
+      console.error(this.formatMessage('info', message, meta));
     }
   }
 

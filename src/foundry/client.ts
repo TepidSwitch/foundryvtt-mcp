@@ -486,9 +486,13 @@ export class FoundryClient {
     // Broadcasts missed during the outage are never replayed, so resync now
     // rather than serving a stale snapshot until someone asks.
     this.refreshWorldData().catch((error) => {
-      logger.warn('Automatic world refresh after reconnect failed; cache stays stale', {
+      // A reconnect with an expired session leaves an anonymous socket that
+      // never answers 'world'. Mark the link lost so the next request does a
+      // full re-login instead of using a dead session.
+      logger.warn('World refresh after reconnect failed; forcing a full re-login on next use', {
         error: error instanceof Error ? error.message : String(error),
       });
+      this.markSessionLost();
     });
   };
 
@@ -562,6 +566,17 @@ export class FoundryClient {
    */
   isWorldDataStale(): boolean {
     return this.worldDataStale;
+  }
+
+  /** Flags the session as unusable so ConnectionManager re-authenticates. */
+  markSessionLost(): void {
+    this._isConnected = false;
+    this.worldDataStale = this.worldData !== null;
+  }
+
+  /** True when the REST API module (FOUNDRY_API_KEY) is configured. */
+  hasRestApi(): boolean {
+    return Boolean(this.config.apiKey);
   }
 
   /** Epoch ms of the last full world snapshot load, or null if none yet. */

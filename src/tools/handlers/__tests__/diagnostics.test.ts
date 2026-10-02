@@ -334,6 +334,7 @@ describe('handleGetHealthStatus', () => {
     return {
       isConnected: () => connected,
       isWorldDataStale: () => stale,
+      hasRestApi: () => true,
       getWorldDataLoadedAt: () => null,
       getWorldInfo: vi.fn().mockResolvedValue({
         id: 'test-world',
@@ -391,6 +392,7 @@ describe('handleGetHealthStatus', () => {
     const failingWorld = {
       isConnected: () => false,
       isWorldDataStale: () => false,
+      hasRestApi: () => true,
       getWorldDataLoadedAt: () => null,
       getWorldInfo: vi.fn().mockRejectedValue(new Error('not connected')),
     } as unknown as FoundryClient;
@@ -441,6 +443,7 @@ describe('handleGetHealthStatus connection reporting', () => {
     const client = {
       isConnected: () => false,
       isWorldDataStale: () => false,
+      hasRestApi: () => false,
       getWorldDataLoadedAt: () => null,
       getWorldInfo: async () => {
         throw new Error('not connected');
@@ -455,5 +458,6 @@ describe('handleGetHealthStatus connection reporting', () => {
     const text = (result.content[0] as { text: string }).text;
     expect(text).toContain('Connecting (attempt 3)');
     expect(text).toContain('No session cookie returned from /join');
+    expect(text).toContain('needs the Foundry REST API module');
   });
 });

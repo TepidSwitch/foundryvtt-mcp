@@ -137,13 +137,31 @@ class FoundryMCPServer {
         if (name !== 'get_health_status') {
           await this.connection.ensureConnected();
         }
-        return (await routeToolRequest(
-          name,
-          args || {},
-          this.foundryClient,
-          this.diagnosticsClient,
-          this.diagnosticSystem,
-        )) as CallToolResult;
+        const route = () =>
+          routeToolRequest(
+            name,
+            args || {},
+            this.foundryClient,
+            this.diagnosticsClient,
+            this.diagnosticSystem,
+          ) as Promise<CallToolResult>;
+        try {
+          return await route();
+        } catch (error) {
+          // The link dropped before the request was sent (safe to repeat, even
+          // for writes): re-establish it and try exactly once more.
+          if (
+            name !== 'get_health_status' &&
+            error instanceof Error &&
+            /not connected|Not connected/.test(error.message)
+          ) {
+            logger.warn('Foundry link was down; reconnecting and retrying once', { name });
+            this.foundryClient.markSessionLost();
+            await this.connection.ensureConnected();
+            return await route();
+          }
+          throw error;
+        }
       } catch (error) {
         logger.error('Tool execution failed:', error);
 
