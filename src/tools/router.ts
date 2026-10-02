@@ -65,6 +65,7 @@ import {
   handleGetCompendiumDocument,
   handleGetRollTable,
 } from './handlers/world-browse.js';
+import { handleGetWriteLog, handleUndoLastWrite } from './handlers/write-safety.js';
 import { toolRegistry } from './registry.js';
 
 /**
@@ -336,6 +337,10 @@ export async function routeToolRequest(
 
     // Journal mutation tools (WRITE) — Socket.IO modifyDocument protocol
     // (foundryClient); require FOUNDRY_WRITE_ENABLED=true + a GM user.
+    case 'get_write_log':
+      return handleGetWriteLog(args as { limit?: number }, foundryClient);
+    case 'undo_last_write':
+      return handleUndoLastWrite(args as { write_id?: string }, foundryClient);
     case 'write_session_notes':
       return handleWriteSessionNotes(
         args as {

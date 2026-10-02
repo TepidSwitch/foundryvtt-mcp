@@ -1097,6 +1097,38 @@ export const journalMutationTools = [
 ];
 
 /**
+ * Write-safety tool definitions
+ */
+export const writeSafetyTools = [
+  {
+    name: 'get_write_log',
+    description:
+      "List the most recent world writes this MCP server made (create/update/delete, which documents, when, and whether each was undone or only a dry run). Survives restarts. Use when: checking what Claude changed in the world, or finding a write_id to undo. Do not use when: you want Foundry's own change history - this only covers writes made through this server.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'How many entries to show (default 15, max 100)' },
+      },
+    },
+  },
+  {
+    name: 'undo_last_write',
+    description:
+      'Reverse a write made through this server: a create is deleted, an update has the fields it touched restored to their previous values, a delete is re-created with its original id. Defaults to the newest write that has not been undone; pass write_id (from get_write_log) for an older one. Best effort - later edits to the same document are not detected. Use when: a change Claude made was wrong. ' +
+      WRITE_GATE,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        write_id: {
+          type: 'string',
+          description: 'Entry id from get_write_log; omit for the newest undoable write',
+        },
+      },
+    },
+  },
+];
+
+/**
  * World-level tool definitions
  */
 export const worldTools = [
@@ -1159,6 +1191,7 @@ export function getAllTools() {
     ...userTools,
     ...journalTools,
     ...journalMutationTools,
+    ...writeSafetyTools,
     ...worldTools,
     ...generationTools,
     ...diagnosticsTools,

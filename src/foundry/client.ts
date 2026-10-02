@@ -40,9 +40,11 @@ import { VISIBILITY_LEVELS } from './types.js';
 import {
   applyDocumentBroadcast,
   applyUserActivity,
+  findCachedDocuments,
   parseDocumentBroadcast,
   parseUserActivity,
 } from './world-cache.js';
+import { type AuditEntry, fakeDocumentId, namesOf, planUndo, WriteAudit } from './write-audit.js';
 
 /** FoundryVTT document IDs are 16-character alphanumeric strings. */
 const FOUNDRY_ID_PATTERN = /^[a-zA-Z0-9]{16}$/;
@@ -165,6 +167,10 @@ export interface FoundryClientConfig {
   socketPath?: string;
   /** Opt-in gate for game-state mutations (FOUNDRY_WRITE_ENABLED). Default false. */
   writeEnabled?: boolean;
+  /** Log writes but do not send them (FOUNDRY_DRY_RUN). */
+  dryRun?: boolean;
+  /** JSONL audit file path; null/undefined keeps the log in memory only. */
+  auditFile?: string | null;
 }
 
 /** Minimal shape of FoundryVTT's `modifyDocument` Socket.IO acknowledgement. */
@@ -219,6 +225,9 @@ export class FoundryClient {
   /** Set when the socket drops with a cache still loaded (#217). */
   private worldDataStale = false;
   private worldDataLoadedAt: number | null = null;
+  readonly audit: WriteAudit;
+  private dryRunWrites = 0;
+  private currentUndoOf: string | null = null;
   /**
    * Last observed outcome of a REST request: false once one failed to reach
    * FoundryVTT at all (#217). Unused in Socket.IO mode.
@@ -243,6 +252,8 @@ export class FoundryClient {
       socketPath: '/socket.io/',
       ...config,
     };
+
+    this.audit = new WriteAudit(this.config.auditFile ?? null);
 
     this.http = axios.create({
       baseURL: this.config.baseUrl,
@@ -566,6 +577,37 @@ export class FoundryClient {
    */
   isWorldDataStale(): boolean {
     return this.worldDataStale;
+  }
+
+  /** Number of writes intercepted by dry-run mode so far. */
+  getDryRunWriteCount(): number {
+    return this.dryRunWrites;
+  }
+
+  /** Reverses a logged write (best effort, see write-audit.ts). */
+  async undoWrite(id?: string): Promise<{ undone: AuditEntry; message: string }> {
+    this.assertWriteable();
+    const entry = id ? this.audit.get(id) : this.audit.lastUndoable();
+    if (!entry) {
+      throw new Error(id ? `No write with id ${id}` : 'There is no write to undo');
+    }
+    const plan = planUndo(entry);
+    if (!plan.ok) {
+      throw new Error(`Cannot undo ${entry.id}: ${plan.reason}`);
+    }
+    // The reversal is itself logged, linked to the entry it reverts.
+    this.currentUndoOf = entry.id;
+    let result: unknown[];
+    try {
+      result = await this.modifyDocument(plan.op.type, plan.op.action, plan.op.operation);
+    } finally {
+      this.currentUndoOf = null;
+    }
+    this.audit.markUndone(entry.id);
+    return {
+      undone: entry,
+      message: `${plan.op.action} ${plan.op.type} (${result.length} document(s))`,
+    };
   }
 
   /** Flags the session as unusable so ConnectionManager re-authenticates. */
@@ -1134,6 +1176,46 @@ export class FoundryClient {
     action: 'create' | 'update' | 'delete',
     operation: Record<string, unknown>,
   ): Promise<unknown[]> {
+    const parentUuidArg =
+      typeof operation.parentUuid === 'string' && operation.parentUuid
+        ? operation.parentUuid
+        : undefined;
+    const opIds = Array.isArray(operation.ids) ? (operation.ids as string[]) : [];
+    const opUpdates = Array.isArray(operation.updates)
+      ? (operation.updates as Array<Record<string, unknown>>)
+      : [];
+    const opData = Array.isArray(operation.data)
+      ? (operation.data as Array<Record<string, unknown>>)
+      : [];
+    const touchedIds =
+      action === 'delete' ? opIds : action === 'update' ? opUpdates.map((u) => String(u._id)) : [];
+    const before =
+      action !== 'create' && this.worldData
+        ? findCachedDocuments(this.worldData, type, touchedIds, parentUuidArg)
+        : undefined;
+
+    if (this.config.dryRun) {
+      this.dryRunWrites += 1;
+      const placeholder =
+        action === 'create'
+          ? opData.map((d) => ({ ...d, _id: (d._id as string | undefined) ?? fakeDocumentId() }))
+          : action === 'update'
+            ? opUpdates
+            : opIds;
+      this.audit.record({
+        type,
+        action,
+        ...(parentUuidArg ? { parentUuid: parentUuidArg } : {}),
+        ids:
+          action === 'create'
+            ? (placeholder as Array<Record<string, unknown>>).map((d) => String(d._id))
+            : touchedIds,
+        names: namesOf(action === 'create' ? opData : before),
+        dryRun: true,
+      });
+      return placeholder as unknown[];
+    }
+
     const request = {
       type,
       action,
@@ -1146,6 +1228,20 @@ export class FoundryClient {
       );
     }
     const result = Array.isArray(response?.result) ? response.result : [];
+
+    this.audit.record({
+      type,
+      action,
+      ...(parentUuidArg ? { parentUuid: parentUuidArg } : {}),
+      ids:
+        action === 'create'
+          ? (result as Array<Record<string, unknown>>).map((d) => String(d._id))
+          : touchedIds,
+      names: namesOf(action === 'create' ? (result as Array<Record<string, unknown>>) : before),
+      ...(this.currentUndoOf ? { undoOf: this.currentUndoOf } : {}),
+      ...(action === 'update' ? { updates: opUpdates } : {}),
+      ...(before && before.length > 0 ? { before } : {}),
+    });
 
     // FoundryVTT broadcasts a change to every OTHER client, never back to the one
     // that made it, so without this our own writes would leave the cached world

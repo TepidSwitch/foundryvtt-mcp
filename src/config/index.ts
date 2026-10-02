@@ -58,6 +58,8 @@ const ConfigSchema = z.object({
     retryAttempts: z.number().default(3),
     retryDelay: z.number().default(1000),
     writeEnabled: z.boolean().default(false),
+    dryRun: z.boolean().default(false),
+    auditFile: z.string().optional(),
   }),
 
   cache: z.object({
@@ -116,6 +118,11 @@ function loadConfig(): Config {
         process.env.FOUNDRY_WRITE_ENABLED !== undefined
           ? process.env.FOUNDRY_WRITE_ENABLED === 'true'
           : undefined,
+      dryRun:
+        process.env.FOUNDRY_DRY_RUN !== undefined
+          ? process.env.FOUNDRY_DRY_RUN === 'true'
+          : undefined,
+      auditFile: process.env.FOUNDRY_AUDIT_FILE,
     },
 
     cache: {

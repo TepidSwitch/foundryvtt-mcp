@@ -375,3 +375,33 @@ export function applyUserActivity(worldData: WorldData, activity: UserActivity):
   worldData.activeUsers.splice(index, 1);
   return true;
 }
+
+/**
+ * Looks up cached source documents by id (top-level or embedded one level
+ * deep), deep-cloned so later cache edits cannot alter the copy. Used to
+ * snapshot a document before a write for the audit log / undo. Ids that are
+ * not cached are simply absent from the result.
+ */
+export function findCachedDocuments(
+  worldData: WorldData,
+  type: string,
+  ids: string[],
+  parentUuid?: string,
+): Array<Record<string, unknown>> {
+  let collection: unknown;
+  if (parentUuid) {
+    const resolved = resolveParent(worldData, parentUuid);
+    const field = resolved ? EMBEDDED_COLLECTIONS[resolved.parentType]?.[type] : undefined;
+    collection = resolved && field ? resolved.parent[field] : undefined;
+  } else {
+    const key = TOP_LEVEL_COLLECTIONS[type];
+    collection = key ? worldData[key] : undefined;
+  }
+  if (!Array.isArray(collection)) {
+    return [];
+  }
+  const wanted = new Set(ids);
+  return (collection as Array<Record<string, unknown>>)
+    .filter((doc) => typeof doc._id === 'string' && wanted.has(doc._id))
+    .map((doc) => structuredClone(doc));
+}

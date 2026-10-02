@@ -33,6 +33,7 @@ import { config } from './config/index.js';
 import { DiagnosticsClient } from './diagnostics/client.js';
 import { FoundryClient, type FoundryClientConfig } from './foundry/client.js';
 import { ConnectionManager, setConnectionStatusProvider } from './foundry/connection-manager.js';
+import { defaultAuditPath } from './foundry/write-audit.js';
 import {
   getAllResources,
   getAllTools,
@@ -79,6 +80,12 @@ class FoundryMCPServer {
       retryAttempts: config.foundry.retryAttempts,
       retryDelay: config.foundry.retryDelay,
       writeEnabled: config.foundry.writeEnabled,
+      dryRun: config.foundry.dryRun,
+      // FOUNDRY_AUDIT_FILE=off keeps the write log in memory only.
+      auditFile:
+        config.foundry.auditFile === 'off'
+          ? null
+          : (config.foundry.auditFile ?? defaultAuditPath()),
     };
     if (config.foundry.apiKey) {
       clientConfig.apiKey = config.foundry.apiKey;
@@ -145,8 +152,24 @@ class FoundryMCPServer {
             this.diagnosticsClient,
             this.diagnosticSystem,
           ) as Promise<CallToolResult>;
+        const dryBefore = this.foundryClient.getDryRunWriteCount();
+        const withDryRunBanner = (result: CallToolResult): CallToolResult => {
+          if (this.foundryClient.getDryRunWriteCount() === dryBefore) {
+            return result;
+          }
+          return {
+            ...result,
+            content: [
+              {
+                type: 'text',
+                text: '🧪 DRY RUN (FOUNDRY_DRY_RUN=true): nothing was written to Foundry. The output below shows what would have happened.',
+              },
+              ...result.content,
+            ],
+          };
+        };
         try {
-          return await route();
+          return withDryRunBanner(await route());
         } catch (error) {
           // The link dropped before the request was sent (safe to repeat, even
           // for writes): re-establish it and try exactly once more.
@@ -158,7 +181,7 @@ class FoundryMCPServer {
             logger.warn('Foundry link was down; reconnecting and retrying once', { name });
             this.foundryClient.markSessionLost();
             await this.connection.ensureConnected();
-            return await route();
+            return withDryRunBanner(await route());
           }
           throw error;
         }
