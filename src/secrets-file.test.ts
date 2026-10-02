@@ -17,7 +17,7 @@ describe('secrets file', () => {
   it('returns null when no default file exists', () => {
     expect(resolveSecretsPath({ XDG_CONFIG_HOME: join(tmpdir(), 'nope-xyz') })).toBeNull();
   });
-  it('warns about loose permissions on posix only', () => {
+  it.skipIf(process.platform === 'win32')('warns about loose permissions on posix only', () => {
     const f = join(mkdtempSync(join(tmpdir(), 'sec-')), '.env');
     writeFileSync(f, 'A=1');
     chmodSync(f, 0o644);
