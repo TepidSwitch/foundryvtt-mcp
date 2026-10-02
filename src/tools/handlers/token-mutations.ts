@@ -80,7 +80,8 @@ export async function handleMoveToken(
  * the effect is matched by its `statuses` array, so re-applying an already
  * present condition (or removing an absent one) is a no-op. Linked actors
  * resolve to `Actor.<id>`; unlinked tokens target their synthetic actor at
- * `Scene.<sid>.Token.<tid>.Actor.<aid>`.
+ * `Scene.<sid>.Token.<tid>.ActorDelta.<tid>` (Foundry v14 rejects the
+ * older `...Actor.<aid>` form).
  */
 export async function handleApplyStatusEffect(
   args: { tokenId: string; statusId: string; active?: boolean; sceneId?: string },
@@ -118,7 +119,7 @@ export async function handleApplyStatusEffect(
   const linked = token.actorLink === true;
   const parentActorUuid = linked
     ? `Actor.${actorId}`
-    : `Scene.${located.scene._id}.Token.${tokenId}.Actor.${actorId}`;
+    : `Scene.${located.scene._id}.Token.${tokenId}.ActorDelta.${tokenId}`;
 
   // Find an existing effect carrying this status (matches toggleStatusEffect).
   const effects: WorldEffect[] = linked

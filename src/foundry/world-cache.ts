@@ -57,6 +57,8 @@ const EMBEDDED_COLLECTIONS: Record<string, Record<string, string>> = {
   Scene: { Token: 'tokens', AmbientLight: 'lights', Wall: 'walls', Drawing: 'drawings' },
   Combat: { Combatant: 'combatants' },
   Item: { ActiveEffect: 'effects' },
+  // An unlinked token's synthetic actor: its data lives on `token.delta`.
+  ActorDelta: { Item: 'items', ActiveEffect: 'effects' },
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -207,8 +209,9 @@ function applyToCollection(
 /**
  * Resolves the parent document a broadcast targets.
  *
- * Handles the simple `<Type>.<id>` form. The synthetic-token-actor form
- * (`Scene.<sid>.Token.<tid>.Actor.<aid>`, used for unlinked tokens) is **not**
+ * Handles the simple `<Type>.<id>` form and the unlinked-token
+ * `Scene.<sid>.Token.<tid>.ActorDelta.<tid>` form. The older
+ * `Scene.<sid>.Token.<tid>.Actor.<aid>` form is **not**
  * resolved: that actor is a per-token delta rather than a document in any cached
  * collection, so those broadcasts are dropped and the affected token actor stays
  * stale until `refresh_world_data`.
@@ -218,6 +221,28 @@ function resolveParent(
   parentUuid: string,
 ): { parentType: string; parent: Record<string, unknown> } | null {
   const segments = parentUuid.split('.');
+
+  // Unlinked token actor: Scene.<sid>.Token.<tid>.ActorDelta.<tid>. Foundry v14
+  // rejects the older `...Token.<tid>.Actor.<aid>` form for embedded writes.
+  if (
+    segments.length === 6 &&
+    segments[0] === 'Scene' &&
+    segments[2] === 'Token' &&
+    segments[4] === 'ActorDelta'
+  ) {
+    const scene = worldData.scenes.find((sc) => sc._id === segments[1]);
+    const tokens = (scene as unknown as { tokens?: Array<Record<string, unknown>> } | undefined)
+      ?.tokens;
+    const token = tokens?.find((t) => t._id === segments[3]);
+    if (!token) {
+      return null;
+    }
+    if (!isRecord(token.delta)) {
+      token.delta = { _id: segments[3] };
+    }
+    return { parentType: 'ActorDelta', parent: token.delta as Record<string, unknown> };
+  }
+
   if (segments.length !== 2) {
     return null;
   }

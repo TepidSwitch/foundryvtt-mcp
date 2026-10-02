@@ -107,7 +107,7 @@ describe('Token mutation handlers', () => {
       await handleApplyStatusEffect({ tokenId: TOKEN_ID, statusId: 'stunned' }, client);
 
       expect(client.createActorStatusEffect).toHaveBeenCalledWith(
-        `Scene.${SCENE_ID}.Token.${TOKEN_ID}.Actor.${ACTOR_ID}`,
+        `Scene.${SCENE_ID}.Token.${TOKEN_ID}.ActorDelta.${TOKEN_ID}`,
         'stunned',
       );
     });

@@ -283,7 +283,7 @@ describe('applyDocumentBroadcast — embedded documents', () => {
     ).toBe(false);
   });
 
-  it('ignores synthetic token-actor UUIDs, which are not cached documents', () => {
+  it('ignores the legacy synthetic token-actor UUID form', () => {
     const world = buildWorldData();
     expect(
       applyDocumentBroadcast(world, {
@@ -293,6 +293,36 @@ describe('applyDocumentBroadcast — embedded documents', () => {
         parentUuid: `Scene.${SCENE_ID}.Token.${TOKEN_ID}.Actor.${ACTOR_ID}`,
       }),
     ).toBe(false);
+  });
+});
+
+describe('unlinked token ActorDelta effects', () => {
+  it('creates and removes an effect on token.delta, materializing the delta', () => {
+    const world = buildWorldData();
+    const uuid = `Scene.${SCENE_ID}.Token.${TOKEN_ID}.ActorDelta.${TOKEN_ID}`;
+    expect(
+      applyDocumentBroadcast(world, {
+        type: 'ActiveEffect',
+        action: 'create',
+        result: [{ _id: 'effect0000000000', statuses: ['prone'] }],
+        parentUuid: uuid,
+      }),
+    ).toBe(true);
+    const token = (
+      world.scenes[0] as unknown as {
+        tokens: Array<{ _id: string; delta?: { effects: unknown[] } }>;
+      }
+    ).tokens.find((t) => t._id === TOKEN_ID);
+    expect(token?.delta?.effects).toHaveLength(1);
+    expect(
+      applyDocumentBroadcast(world, {
+        type: 'ActiveEffect',
+        action: 'delete',
+        result: ['effect0000000000'],
+        parentUuid: uuid,
+      }),
+    ).toBe(true);
+    expect(token?.delta?.effects).toHaveLength(0);
   });
 });
 

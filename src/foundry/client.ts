@@ -115,10 +115,12 @@ const SORT_INTEGER_DENSITY = 100000;
 /**
  * Accepts the two parent-UUID forms a token's actor can take:
  *  - `Actor.<id>` — a world-linked actor (`actorLink: true`)
- *  - `Scene.<sid>.Token.<tid>.Actor.<aid>` — an unlinked token's synthetic actor
+ *  - `Scene.<sid>.Token.<tid>.ActorDelta.<tid>` — an unlinked token's synthetic
+ *    actor (the form Foundry v14 accepts; the legacy `...Token.<tid>.Actor.<aid>`
+ *    is still allowed through for older servers)
  */
 const TOKEN_ACTOR_UUID_PATTERN =
-  /^(Actor\.[a-zA-Z0-9]{16}|Scene\.[a-zA-Z0-9]{16}\.Token\.[a-zA-Z0-9]{16}\.Actor\.[a-zA-Z0-9]{16})$/;
+  /^(Actor\.[a-zA-Z0-9]{16}|Scene\.[a-zA-Z0-9]{16}\.Token\.[a-zA-Z0-9]{16}\.(Actor|ActorDelta)\.[a-zA-Z0-9]{16})$/;
 
 /**
  * Minimal Zod schema for the `/api/dice/roll` REST response.
@@ -1648,8 +1650,8 @@ export class FoundryClient {
    * `ActiveEffect` is an embedded document of `Actor`, so the create is sent with
    * the actor's parent UUID:
    *  - `Actor.<id>` for a world-linked actor (`actorLink: true`)
-   *  - `Scene.<sid>.Token.<tid>.Actor.<aid>` for an unlinked token's synthetic
-   *    actor (the per-token delta).
+   *  - `Scene.<sid>.Token.<tid>.ActorDelta.<tid>` for an unlinked token's
+   *    synthetic actor (the per-token delta; v14 rejects `...Actor.<aid>`).
    *
    * The effect carries a `statuses` array, matching how FoundryVTT v11+ models
    * conditions (`Actor#toggleStatusEffect` toggles by this field).
