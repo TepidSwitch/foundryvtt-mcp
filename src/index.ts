@@ -32,6 +32,7 @@ import {
 import { config } from './config/index.js';
 import { DiagnosticsClient } from './diagnostics/client.js';
 import { FoundryClient, type FoundryClientConfig } from './foundry/client.js';
+import { ConnectionManager } from './foundry/connection-manager.js';
 import {
   getAllResources,
   getAllTools,
@@ -48,6 +49,7 @@ import { logger } from './utils/logger.js';
 class FoundryMCPServer {
   private server: Server;
   private foundryClient: FoundryClient;
+  private connection: ConnectionManager;
   private diagnosticsClient: DiagnosticsClient;
   private diagnosticSystem: DiagnosticSystem;
 
@@ -91,6 +93,7 @@ class FoundryMCPServer {
       clientConfig.userId = config.foundry.userId;
     }
     this.foundryClient = new FoundryClient(clientConfig);
+    this.connection = new ConnectionManager(this.foundryClient);
 
     // Initialize DiagnosticsClient
     this.diagnosticsClient = new DiagnosticsClient(this.foundryClient);
@@ -128,6 +131,8 @@ class FoundryMCPServer {
       logger.info('Executing tool', { name, args });
 
       try {
+        // Handshake is already done; wait for (or re-establish) the Foundry link.
+        await this.connection.ensureConnected();
         return (await routeToolRequest(
           name,
           args || {},
@@ -155,6 +160,7 @@ class FoundryMCPServer {
       logger.info('Reading resource', { uri });
 
       try {
+        await this.connection.ensureConnected();
         return await routeResourceRequest(uri, this.foundryClient, this.diagnosticsClient);
       } catch (error) {
         logger.error('Resource read failed:', error);
@@ -177,14 +183,12 @@ class FoundryMCPServer {
    */
   async start(): Promise<void> {
     try {
-      // Connect to FoundryVTT
-      await this.foundryClient.connect();
-      logger.info('Connected to FoundryVTT successfully');
-
-      // Start the MCP server
+      // Answer the MCP handshake immediately; Foundry login (slow, can fail
+      // transiently) happens in the background with retry.
       const transport = new StdioServerTransport();
       await this.server.connect(transport);
       logger.info('FoundryVTT MCP Server started successfully');
+      this.connection.start();
     } catch (error) {
       logger.error('Failed to start server:', error);
       throw error;
