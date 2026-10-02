@@ -334,6 +334,7 @@ describe('handleGetHealthStatus', () => {
     return {
       isConnected: () => connected,
       isWorldDataStale: () => stale,
+      getWorldDataLoadedAt: () => null,
       getWorldInfo: vi.fn().mockResolvedValue({
         id: 'test-world',
         title: 'Test World',
@@ -390,6 +391,7 @@ describe('handleGetHealthStatus', () => {
     const failingWorld = {
       isConnected: () => false,
       isWorldDataStale: () => false,
+      getWorldDataLoadedAt: () => null,
       getWorldInfo: vi.fn().mockRejectedValue(new Error('not connected')),
     } as unknown as FoundryClient;
 
@@ -424,5 +426,34 @@ describe('handleGetHealthStatus', () => {
 
     expect(text).not.toMatch(/stale/i);
     expect(text).not.toContain('refresh_world_data');
+  });
+});
+
+describe('handleGetHealthStatus connection reporting', () => {
+  it('explains a retrying login instead of a bare Disconnected', async () => {
+    const { setConnectionStatusProvider } = await import('../../../foundry/connection-manager.js');
+    setConnectionStatusProvider(() => ({
+      connected: false,
+      attempts: 3,
+      lastError: 'No session cookie returned from /join',
+      fatal: null,
+    }));
+    const client = {
+      isConnected: () => false,
+      isWorldDataStale: () => false,
+      getWorldDataLoadedAt: () => null,
+      getWorldInfo: async () => {
+        throw new Error('not connected');
+      },
+    } as unknown as FoundryClient;
+    const diag = {
+      getSystemHealth: async () => {
+        throw new Error('x');
+      },
+    } as unknown as DiagnosticsClient;
+    const result = await handleGetHealthStatus({}, client, diag);
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain('Connecting (attempt 3)');
+    expect(text).toContain('No session cookie returned from /join');
   });
 });

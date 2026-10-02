@@ -146,3 +146,16 @@ export class ConnectionManager {
     }
   }
 }
+
+export type ConnectionStatus = ReturnType<ConnectionManager['status']>;
+
+let statusProvider: (() => ConnectionStatus) | null = null;
+
+/** Lets tool handlers (e.g. get_health_status) report login state. */
+export function setConnectionStatusProvider(fn: () => ConnectionStatus): void {
+  statusProvider = fn;
+}
+
+export function getConnectionStatus(): ConnectionStatus | null {
+  return statusProvider?.() ?? null;
+}

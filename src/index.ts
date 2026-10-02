@@ -32,7 +32,7 @@ import {
 import { config } from './config/index.js';
 import { DiagnosticsClient } from './diagnostics/client.js';
 import { FoundryClient, type FoundryClientConfig } from './foundry/client.js';
-import { ConnectionManager } from './foundry/connection-manager.js';
+import { ConnectionManager, setConnectionStatusProvider } from './foundry/connection-manager.js';
 import {
   getAllResources,
   getAllTools,
@@ -94,6 +94,7 @@ class FoundryMCPServer {
     }
     this.foundryClient = new FoundryClient(clientConfig);
     this.connection = new ConnectionManager(this.foundryClient);
+    setConnectionStatusProvider(() => this.connection.status());
 
     // Initialize DiagnosticsClient
     this.diagnosticsClient = new DiagnosticsClient(this.foundryClient);
@@ -132,7 +133,10 @@ class FoundryMCPServer {
 
       try {
         // Handshake is already done; wait for (or re-establish) the Foundry link.
-        await this.connection.ensureConnected();
+        // The health tool must answer even while disconnected — it explains why.
+        if (name !== 'get_health_status') {
+          await this.connection.ensureConnected();
+        }
         return (await routeToolRequest(
           name,
           args || {},

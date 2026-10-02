@@ -218,6 +218,7 @@ export class FoundryClient {
   private worldData: WorldData | null = null;
   /** Set when the socket drops with a cache still loaded (#217). */
   private worldDataStale = false;
+  private worldDataLoadedAt: number | null = null;
   /**
    * Last observed outcome of a REST request: false once one failed to reach
    * FoundryVTT at all (#217). Unused in Socket.IO mode.
@@ -311,6 +312,7 @@ export class FoundryClient {
     // Connect authenticated socket and load world data
     this.worldData = await this.connectAndLoadWorld(session);
     this.worldDataStale = false;
+    this.worldDataLoadedAt = Date.now();
     this._isConnected = true;
     logger.info('Connected to FoundryVTT via Socket.IO', {
       actors: this.worldData.actors.length,
@@ -480,7 +482,14 @@ export class FoundryClient {
    */
   private onSocketConnect = (): void => {
     this._isConnected = true;
-    logger.info('FoundryVTT socket reconnected — cached world data is still stale until refreshed');
+    logger.info('FoundryVTT socket reconnected — refreshing cached world data');
+    // Broadcasts missed during the outage are never replayed, so resync now
+    // rather than serving a stale snapshot until someone asks.
+    this.refreshWorldData().catch((error) => {
+      logger.warn('Automatic world refresh after reconnect failed; cache stays stale', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   };
 
   private onSocketDisconnect = (reason?: unknown): void => {
@@ -555,6 +564,11 @@ export class FoundryClient {
     return this.worldDataStale;
   }
 
+  /** Epoch ms of the last full world snapshot load, or null if none yet. */
+  getWorldDataLoadedAt(): number | null {
+    return this.worldDataLoadedAt;
+  }
+
   /**
    * Returns true if worldData is available (Socket.IO mode connected).
    */
@@ -609,6 +623,7 @@ export class FoundryClient {
     });
 
     this.worldDataStale = false;
+    this.worldDataLoadedAt = Date.now();
     logger.info('World data refreshed', {
       actors: this.worldData.actors.length,
       items: this.worldData.items.length,

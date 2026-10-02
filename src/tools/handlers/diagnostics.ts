@@ -9,6 +9,7 @@ import type { DiagnosticsClient } from '../../diagnostics/client.js';
 import type { LogEntry } from '../../diagnostics/types.js';
 import { LogEntrySchema } from '../../diagnostics/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
+import { getConnectionStatus } from '../../foundry/connection-manager.js';
 import type { DiagnosticSystem } from '../../utils/diagnostics.js';
 import { withToolError } from './utils.js';
 
@@ -338,6 +339,29 @@ ${diagnosis.recommendations.map((rec: string) => `- ${rec}`).join('\n')}
   });
 }
 
+function connectionLine(foundryClient: FoundryClient): string {
+  const status = getConnectionStatus();
+  const lines: string[] = [];
+  if (foundryClient.isConnected()) {
+    lines.push('✅ Connected');
+  } else if (status?.fatal) {
+    lines.push(`❌ Login rejected — ${status.fatal}`);
+  } else if (status && status.attempts > 0) {
+    lines.push(`⏳ Connecting (attempt ${status.attempts}) — retrying with backoff`);
+    if (status.lastError) {
+      lines.push(`- **Last error:** ${status.lastError}`);
+    }
+  } else {
+    lines.push('❌ Disconnected');
+  }
+  const loadedAt = foundryClient.getWorldDataLoadedAt();
+  if (loadedAt) {
+    const secs = Math.round((Date.now() - loadedAt) / 1000);
+    lines.push(`- **World data last loaded:** ${secs}s ago`);
+  }
+  return lines.join('\n');
+}
+
 /**
  * Handles comprehensive health status requests
  *
@@ -402,7 +426,7 @@ export async function handleGetHealthStatus(
           text: `\u{1FA7A} **Comprehensive Health Status**
 
 **FoundryVTT Connection:**
-${foundryClient.isConnected() ? '✅ Connected' : '❌ Disconnected'}
+${connectionLine(foundryClient)}
 
 **World Information:**
 ${worldLines.join('\n')}
