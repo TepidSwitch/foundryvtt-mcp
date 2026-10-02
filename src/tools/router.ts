@@ -52,6 +52,7 @@ import {
   handleSearchScenes,
   handleSuggestScenes,
 } from './handlers/scenes.js';
+import { handleWriteSessionNotes } from './handlers/session-notes.js';
 import { handleApplyStatusEffect, handleMoveToken } from './handlers/token-mutations.js';
 import { handleGetUsers } from './handlers/users.js';
 import {
@@ -335,6 +336,18 @@ export async function routeToolRequest(
 
     // Journal mutation tools (WRITE) — Socket.IO modifyDocument protocol
     // (foundryClient); require FOUNDRY_WRITE_ENABLED=true + a GM user.
+    case 'write_session_notes':
+      return handleWriteSessionNotes(
+        args as {
+          title: string;
+          notes: string;
+          folder?: string;
+          visibility?: DocumentVisibility;
+          link_entities?: boolean;
+          split_by_heading?: boolean;
+        },
+        foundryClient,
+      );
     case 'create_journal_entry':
       if (!('name' in args) || typeof args.name !== 'string') {
         throw new Error('Missing required parameter: name');

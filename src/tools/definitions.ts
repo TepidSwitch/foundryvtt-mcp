@@ -1060,6 +1060,40 @@ export const journalMutationTools = [
       required: ['name', 'pages'],
     },
   },
+  {
+    name: 'write_session_notes',
+    description:
+      'Turn a markdown session recap into a NEW journal entry: headings, bullets and bold are converted to HTML, and names of world actors, scenes and journals found in the text become clickable @UUID links (link_entities, default on; names under 4 characters are skipped). split_by_heading=true makes each "## " section its own page. Defaults to GM-only. Only creates - nothing existing is modified. Use when: saving a session recap or prep notes you have drafted. Do not use when: you need exact page HTML control (use create_journal_entry). ' +
+      WRITE_GATE,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: {
+          type: 'string',
+          description: 'Journal entry title, e.g. "Session 12 - The Sunken Temple"',
+        },
+        notes: { type: 'string', description: 'The recap as markdown' },
+        folder: {
+          type: 'string',
+          description: 'Optional Folder document id to file the entry under',
+        },
+        visibility: {
+          type: 'string',
+          enum: ['gm-only', 'observer', 'owner'],
+          description: "'gm-only' (default), 'observer' (players read) or 'owner' (players edit)",
+        },
+        link_entities: {
+          type: 'boolean',
+          description: 'Link known actor/scene/journal names (default true)',
+        },
+        split_by_heading: {
+          type: 'boolean',
+          description: 'One page per "## " section (default false)',
+        },
+      },
+      required: ['title', 'notes'],
+    },
+  },
 ];
 
 /**
