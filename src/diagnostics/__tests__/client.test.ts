@@ -30,6 +30,7 @@ describe('DiagnosticsClient', () => {
     // Create mocked FoundryClient
     mockFoundryClient = {
       get: vi.fn(),
+      hasRestApi: vi.fn().mockReturnValue(true),
     } as unknown as vi.Mocked<FoundryClient>;
 
     diagnosticsClient = new DiagnosticsClient(mockFoundryClient);

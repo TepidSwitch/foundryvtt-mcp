@@ -79,6 +79,16 @@ call does a full re-login. `get_health_status` shows connecting / connected /
 login rejected, the last error with a plain-language hint, and how old the
 world data is.
 
+## Diagnostics without a Foundry module
+
+`get_system_health`, `get_recent_logs`, `search_logs`, `diagnose_errors` and the
+system section of `get_health_status` work with no REST/diagnostics module
+(`FOUNDRY_API_KEY` unset). Health is computed from the world snapshot (version,
+system, users online, active modules, connection and staleness); the log tools
+read this MCP server's own recent log (logins, tool failures, write errors).
+Foundry's own server log, uptime and memory need a server module and are not
+available in this mode.
+
 ## Write safety
 
 - `get_write_log` lists recent writes made through this server (survives

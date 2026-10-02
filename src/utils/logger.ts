@@ -10,6 +10,18 @@
  */
 
 import { config } from '../config/index.js';
+import { pushLog } from './log-buffer.js';
+
+function withMeta(message: string, meta?: unknown): string {
+  if (!meta) {
+    return message;
+  }
+  try {
+    return `${message} ${typeof meta === 'string' ? meta : JSON.stringify(meta)}`;
+  } catch {
+    return message;
+  }
+}
 
 /**
  * Available log levels in order of severity
@@ -95,6 +107,7 @@ class Logger {
    */
   debug(message: string, meta?: unknown): void {
     if (this.shouldLog('debug')) {
+      pushLog('debug', withMeta(message, meta));
       // stdout carries the MCP JSON-RPC stream; every log level goes to stderr.
       console.error(this.formatMessage('debug', message, meta));
     }
@@ -115,6 +128,7 @@ class Logger {
    */
   info(message: string, meta?: unknown): void {
     if (this.shouldLog('info')) {
+      pushLog('info', withMeta(message, meta));
       console.error(this.formatMessage('info', message, meta));
     }
   }
@@ -134,6 +148,7 @@ class Logger {
    */
   warn(message: string, meta?: unknown): void {
     if (this.shouldLog('warn')) {
+      pushLog('warn', withMeta(message, meta));
       console.warn(this.formatMessage('warn', message, meta));
     }
   }
@@ -156,6 +171,11 @@ class Logger {
     if (this.shouldLog('error')) {
       const errorDetails =
         error instanceof Error ? { message: error.message, stack: error.stack } : error;
+      pushLog(
+        'error',
+        withMeta(message, error instanceof Error ? error.message : errorDetails),
+        error instanceof Error ? error.stack : undefined,
+      );
       console.error(this.formatMessage('error', message, errorDetails));
     }
   }

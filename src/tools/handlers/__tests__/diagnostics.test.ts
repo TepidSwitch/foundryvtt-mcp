@@ -458,6 +458,5 @@ describe('handleGetHealthStatus connection reporting', () => {
     const text = (result.content[0] as { text: string }).text;
     expect(text).toContain('Connecting (attempt 3)');
     expect(text).toContain('No session cookie returned from /join');
-    expect(text).toContain('needs the Foundry REST API module');
   });
 });

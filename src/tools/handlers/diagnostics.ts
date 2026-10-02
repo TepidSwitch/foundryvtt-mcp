@@ -254,6 +254,13 @@ export async function handleGetSystemHealth(
       );
     }
 
+    // Without a Foundry server module there is no process uptime/memory; the
+    // numbers come from the world snapshot and this MCP server's own log.
+    const localNote =
+      server.uptime === undefined && !performance.memory
+        ? "\n\n_Computed from the world snapshot and this MCP server's own log (no Foundry server module installed), so Foundry uptime and memory are not available._"
+        : '';
+
     return {
       content: [
         {
@@ -276,7 +283,7 @@ ${performanceLines.join('\n')}
 - **Buffer:** ${logs.bufferSize} entries
 - **Recent Errors:** ${logs.recentErrors}
 - **Recent Warnings:** ${logs.recentWarnings}
-- **Error Rate:** ${logs.errorRate}%`,
+- **Error Rate:** ${logs.errorRate}%${localNote}`,
         },
       ],
     };
@@ -385,7 +392,7 @@ export async function handleGetHealthStatus(
   return withToolError('get health status', async () => {
     const [worldInfo, systemHealth] = await Promise.all([
       foundryClient.getWorldInfo().catch(() => null),
-      foundryClient.hasRestApi() ? diagnosticsClient.getSystemHealth().catch(() => null) : null,
+      diagnosticsClient.getSystemHealth().catch(() => null),
     ]);
 
     const worldLines = worldInfo
@@ -399,9 +406,7 @@ export async function handleGetHealthStatus(
       worldLines.unshift(STALE_WORLD_DATA_NOTICE);
     }
 
-    let healthSection = foundryClient.hasRestApi()
-      ? 'ℹ️ Not available'
-      : 'ℹ️ Not available (needs the Foundry REST API module / FOUNDRY_API_KEY)';
+    let healthSection = 'ℹ️ Not available';
     if (systemHealth) {
       const healthLines = [
         `- **Status:** ${systemHealth.status}`,

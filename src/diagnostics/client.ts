@@ -11,6 +11,12 @@
 import type { z } from 'zod';
 import type { FoundryClient } from '../foundry/client.js';
 import { logger } from '../utils/logger.js';
+import {
+  localDiagnoseErrors,
+  localRecentLogs,
+  localSearchLogs,
+  localSystemHealth,
+} from './local.js';
 import type { LogPatternSearchParams, LogSearchParams } from './types.js';
 import {
   ErrorDiagnosisSchema,
@@ -80,6 +86,9 @@ export class DiagnosticsClient {
    * ```
    */
   async getRecentLogs(params: LogSearchParams = {}): Promise<LogResponse> {
+    if (!this.foundryClient.hasRestApi()) {
+      return localRecentLogs(params);
+    }
     try {
       logger.debug('DiagnosticsClient | Getting recent logs', params);
 
@@ -149,6 +158,9 @@ export class DiagnosticsClient {
    * ```
    */
   async searchLogs(params: LogPatternSearchParams): Promise<LogSearchResponse> {
+    if (!this.foundryClient.hasRestApi()) {
+      return localSearchLogs(params);
+    }
     try {
       logger.debug('DiagnosticsClient | Searching logs', params);
 
@@ -202,6 +214,19 @@ export class DiagnosticsClient {
    * ```
    */
   async getSystemHealth(): Promise<SystemHealth> {
+    if (!this.foundryClient.hasRestApi()) {
+      const world = this.foundryClient.getWorldData();
+      return localSystemHealth({
+        connected: this.foundryClient.isConnected() && world !== null,
+        stale: this.foundryClient.isWorldDataStale(),
+        world: (world?.world ?? {}) as Record<string, unknown>,
+        system: (world?.system ?? {}) as Record<string, unknown>,
+        release: (world?.release ?? {}) as Record<string, unknown>,
+        users: world?.users ?? [],
+        activeUsers: world?.activeUsers ?? [],
+        modules: world?.modules ?? [],
+      });
+    }
     try {
       logger.debug('DiagnosticsClient | Getting system health');
 
@@ -247,6 +272,9 @@ export class DiagnosticsClient {
    * ```
    */
   async diagnoseErrors(timeframe: number = 3600): Promise<ErrorDiagnosis> {
+    if (!this.foundryClient.hasRestApi()) {
+      return localDiagnoseErrors(timeframe);
+    }
     try {
       logger.debug('DiagnosticsClient | Diagnosing errors', { timeframe });
 
@@ -354,6 +382,10 @@ export class DiagnosticsClient {
    * ```
    */
   async isAvailable(): Promise<boolean> {
+    if (!this.foundryClient.hasRestApi()) {
+      // Local diagnostics (world snapshot + MCP log buffer) are always available.
+      return true;
+    }
     try {
       await this.foundryClient.get('/api/diagnostics/health');
       return true;
