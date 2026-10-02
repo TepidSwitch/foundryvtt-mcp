@@ -11,5 +11,16 @@
  */
 
 import dotenv from 'dotenv';
+import { permissionWarning, resolveSecretsPath } from './secrets-file.js';
 
 dotenv.config({ quiet: true });
+
+// Credentials can live in a chmod-600 file instead of the MCP host config.
+const secretsPath = resolveSecretsPath();
+if (secretsPath) {
+  dotenv.config({ path: secretsPath, quiet: true });
+  const warning = permissionWarning(secretsPath);
+  if (warning) {
+    process.stderr.write(`${warning}\n`);
+  }
+}
