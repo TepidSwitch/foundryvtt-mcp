@@ -70,6 +70,30 @@ bun run test-connection # Test MCP→FoundryVTT connection
 | `LOG_LEVEL` | No | `debug` for verbose output |
 | `FOUNDRY_TIMEOUT` | No | Request timeout (ms, default 10000) |
 
+## Live checks
+
+`just live-check --read` (or `npx tsx scripts/live-check.ts ...` if `just` isn't installed) spawns the built `dist/index.js` and talks to the real world like Claude Desktop does. Run `npm run build` first.
+
+- `--read`: users, world summary, health (read-only, safe anytime)
+- `--dry-run --call <tool> '<json>'`: sets `FOUNDRY_DRY_RUN=true`, writes are simulated
+- `--call <tool> '<json>'`: real call; write checks only on documents named `MCP TEST — delete me`, then `undo_last_write` and search to confirm nothing is left
+
+Foundry and dnd5e client source for checking field names lives outside the repo at `~/foundry-dev/foundry/` (licensed, never commit).
+
+## Critical pitfalls (verified live against Foundry 14.368 / dnd5e 6.0.5)
+
+- **Writes**: every write goes `assertWriteable()` → `emitWithAck()` → `modifyDocument()` in `client.ts`, and is audited (`write-audit.ts`) and dry-run aware. Don't bypass it.
+- **Unlinked token actors**: parent UUID is `Scene.<sid>.Token.<tid>.ActorDelta.<tid>`. v14 rejects `...Token.<tid>.Actor.<aid>`. The cache resolves it (`resolveParent` in `world-cache.ts`).
+- **Deleting keys**: `{"-=key": null}` is deprecated (removed in v16). Wire form is `{key: {"__$OPERATOR$__": "ForcedDeletion"}}`. `planUndo` still emits the old form until the tool-regroup phase.
+- **ActiveEffects**: changes live in `system.changes[]` with a string `type` (`add`, `override`, ...), not `changes[].mode`. MeasuredTemplate is gone; use Regions.
+- **Broadcasts skip the sender**: Foundry never echoes a `modifyDocument` back to the client that made it, so `client.ts` applies its own results to the cache.
+- **Files**: upload is HTTP `POST /upload` multipart (`source=data`, `target=<dir>`, `upload=<file>`) with the session cookie. Browse/mkdir are the socket event `manageFiles` (`{action:"browseFiles"|"createDirectory", storage:"data", target}`) with an ack.
+- **Player rolls without a module**: dnd5e 6 chat enrichers (`[[/check ...]]`, `[[/save ...]]`, `[[/skill ...]]`, `[[/item ...]]`, ...) posted as a normal chat message give players a button. Check option syntax in `enrichString` in `dnd5e.mjs` before use.
+- **Molten stops idle servers**: `/join` returns 302 to the lobby with `status=NOT_RUNNING`. `auth.ts` detects it; ask the user to start the server from the Molten dashboard.
+- **stdout is the JSON-RPC stream**: log to stderr only (`logger`), never `console.log` in the server.
+- **Computed values**: the world snapshot is raw source data. Max HP, AC, proficiency, skill totals and slots must be computed (`dnd5e.ts`); stored `mod`/`prof`/`spelldc` can be stale.
+- **Claude Desktop** must be fully quit and relaunched to load a new build.
+
 ## Rules
 
 See `.claude/rules/` for detailed guidelines:

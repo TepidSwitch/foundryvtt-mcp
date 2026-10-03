@@ -60,10 +60,12 @@ Consequences for new write tools:
   `TOP_LEVEL_COLLECTIONS` or `EMBEDDED_COLLECTIONS` in `world-cache.ts`.
   Unmapped types are dropped silently (by design — an unmodelled payload leaves
   the cache stale rather than corrupt).
-- **Known gap**: broadcasts parented to a *synthetic token actor*
-  (`Scene.<sid>.Token.<tid>.Actor.<aid>`, unlinked tokens) are not applied —
-  that actor is a per-token delta, not a document in any cached collection.
-  Those still need `refresh_world_data`.
+- **Unlinked tokens**: in v14 the parent of a synthetic token actor is
+  `Scene.<sid>.Token.<tid>.ActorDelta.<tid>` (the old `...Actor.<aid>` form is
+  rejected). `resolveParent` in `world-cache.ts` resolves that 6-segment path
+  (materializing `token.delta`) and `EMBEDDED_COLLECTIONS.ActorDelta` maps its
+  `Item`/`ActiveEffect` children, so these writes and broadcasts are applied to
+  the cache. `refresh_world_data` is only needed as a full resync.
 - `refreshWorldData()` (re-emits `world`) remains the full-resync escape hatch.
 
 ## Verify the protocol against the bundled app source — don't guess

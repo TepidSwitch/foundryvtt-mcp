@@ -144,6 +144,11 @@ check-types:
 [group: "quality"]
 qa: lint check-types test
 
+# Run the built server against the live Foundry world (e.g. `just live-check --read`)
+[group: "quality"]
+live-check *args:
+    npx tsx scripts/live-check.ts {{ args }}
+
 ########## Documentation ##########
 
 # Generate TypeDoc documentation
