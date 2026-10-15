@@ -118,7 +118,7 @@ export function resolveActor(foundryClient: FoundryClient, ref: string): WorldAc
   }
   throw new McpError(
     ErrorCode.InvalidParams,
-    `No actor, or player with a character, matches "${ref}". Try search_actors.`,
+    `No actor, or player with a character, matches "${ref}". Try foundry_actors search.`,
   );
 }
 
@@ -282,7 +282,7 @@ export function formatSheet(
       `**Spellcasting** ${sc.ability.toUpperCase()} · save DC ${sc.dc} · attack ${signed(sc.attack ?? 0)}${slotText ? ` · slots ${slotText}` : ''}${sc.pact ? ` · pact slots ${sc.pact.value}/${sc.pact.max} (level ${sc.pact.level})` : ''}`,
     );
     if (spellCount > 0 && !opts.compendium) {
-      lines.push(`${spellCount} spells — use get_actor_items with type "spell" for the list.`);
+      lines.push(`${spellCount} spells — use foundry_actors items with type "spell" for the list.`);
     }
   }
 
@@ -330,7 +330,7 @@ export function formatSheet(
   }
   if (!opts.compendium) {
     lines.push(
-      `Items: ${itemsOf(actor).length} (use get_actor_items for spells, features and gear).`,
+      `Items: ${itemsOf(actor).length} (use foundry_actors items for spells, features and gear).`,
     );
   }
   lines.push('');
@@ -648,7 +648,7 @@ export async function handleGetActorItems(
 
 ${sections.join('\n\n') || 'No items matched.'}
 
-_Item ids can be used with update_actor_item / delete_actor_item. Pass details=true for descriptions._`,
+_Item ids can be used with foundry_items_edit update_on_actor / remove_from_actor. Pass details=true for descriptions._`,
         },
       ],
     };
@@ -713,7 +713,7 @@ ${
     ? `\n**Characters with no assigned player** (retired/unused?)\n${orphans.map((a) => row(a, null)).join('\n')}\n`
     : ''
 }
-_PP/Inv/Ins = passive Perception/Investigation/Insight. HP max is computed from class hit dice when the world stores none. See get_actor_details for a full sheet._`,
+_PP/Inv/Ins = passive Perception/Investigation/Insight. HP max is computed from class hit dice when the world stores none. See foundry_actors get for a full sheet._`,
         },
       ],
     };

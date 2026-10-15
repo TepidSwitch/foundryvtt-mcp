@@ -72,7 +72,10 @@ export function resolveScene(snapshot: WorldData, ref: string): WorldScene {
       `"${ref}" matches several scenes — be more specific or use an id: ${list}`,
     );
   }
-  throw new McpError(ErrorCode.InvalidParams, `No scene matches "${ref}". Try search_scenes.`);
+  throw new McpError(
+    ErrorCode.InvalidParams,
+    `No scene matches "${ref}". Try foundry_scenes search.`,
+  );
 }
 
 interface SceneFacts {
@@ -365,7 +368,7 @@ ${tokenLines.join('\n') || 'none'}${tokens.length > 40 ? `\n…and ${tokens.leng
 **Map notes** (${f.notes})
 ${notes.join('\n') || 'none'}
 
-_Use get_scene_image to see the map itself._`,
+_Use foundry_scenes image to see the map itself._`,
         },
       ],
     };
@@ -438,7 +441,7 @@ export async function handleSearchScenes(
 
 ${shown.map((f) => `- ${line(f)}`).join('\n') || 'No scenes matched.'}
 
-_Use get_scene_info for tokens and notes, suggest_scenes to rank by adventure-readiness, get_scene_image to see the map._`,
+_Use foundry_scenes get for tokens and notes, suggest to rank by adventure-readiness, image to see the map._`,
         },
       ],
     };
@@ -556,7 +559,7 @@ export async function handleSuggestScenes(
 
 ${body || 'No scenes matched. Try a broader theme or lower min_readiness.'}${compendiumBlock}
 
-_Readiness scores how much prep is already done (walls, lights, tokens, notes, journal, audio, size). It does not judge how a map looks — call get_scene_image on a candidate to check._`,
+_Readiness scores how much prep is already done (walls, lights, tokens, notes, journal, audio, size). It does not judge how a map looks — call foundry_scenes image on a candidate to check._`,
         },
       ],
     };

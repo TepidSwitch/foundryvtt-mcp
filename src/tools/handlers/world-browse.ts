@@ -215,7 +215,7 @@ export async function handleGetCompendiumDocument(
   if (!compendiumId || typeof compendiumId !== 'string') {
     throw new McpError(
       ErrorCode.InvalidParams,
-      'compendiumId is required (see browse_world kind="packs" or search_compendium)',
+      'compendiumId is required (see foundry_compendium packs or search)',
     );
   }
   if (!documentId && !name) {

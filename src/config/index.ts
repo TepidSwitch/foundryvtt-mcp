@@ -60,6 +60,8 @@ const ConfigSchema = z.object({
     writeEnabled: z.boolean().default(false),
     dryRun: z.boolean().default(false),
     auditFile: z.string().optional(),
+    // Comma-separated toolset names (FOUNDRY_TOOLSETS); parsed by tools/registry.ts.
+    toolsets: z.string().optional(),
   }),
 
   cache: z.object({
@@ -123,6 +125,7 @@ function loadConfig(): Config {
           ? process.env.FOUNDRY_DRY_RUN === 'true'
           : undefined,
       auditFile: process.env.FOUNDRY_AUDIT_FILE,
+      toolsets: process.env.FOUNDRY_TOOLSETS,
     },
 
     cache: {

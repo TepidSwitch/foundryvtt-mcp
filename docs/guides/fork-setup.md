@@ -67,7 +67,33 @@ after editing; closing the window is not enough.
 | --- | --- | --- |
 | `FOUNDRY_ENV_FILE` | auto | Secrets file path |
 | `FOUNDRY_DRY_RUN` | `false` | Log writes but send nothing; tool output carries a DRY RUN banner |
+| `FOUNDRY_TOOLSETS` | all but `script` | Comma-separated toolsets to expose: `actors`, `items`, `effects`, `scenes`, `tokens`, `combat`, `journals`, `compendium`, `audio`, `chat`, `world`, `files`, `generate`, `history`, `diagnostics`, `script`. Unknown names are ignored with a warning |
 | `FOUNDRY_AUDIT_FILE` | state dir | JSONL write log path, or `off` for memory only. Default: `~/.local/state/foundryvtt-mcp/writes.jsonl` / `%APPDATA%\foundryvtt-mcp\writes.jsonl` |
+
+## Tools
+
+Each domain is one tool with an `action` field, split into a read tool and an
+`_edit` write tool so the MCP annotations stay accurate (`readOnlyHint` on
+reads; `destructiveHint` only on tools that update or delete). `_edit` tools are
+hidden, and refused if called, unless `FOUNDRY_WRITE_ENABLED=true`.
+
+| Toolset | Read tool (actions) | Write tool (actions) |
+| --- | --- | --- |
+| actors | `foundry_actors`: search, get, items, party, find_in_party, compare | `foundry_actors_edit`: update, import |
+| items | `foundry_items`: search | `foundry_items_edit`: add_to_actor, update_on_actor, remove_from_actor |
+| effects | | `foundry_effects_edit`: apply_status |
+| scenes | `foundry_scenes`: search, get, suggest, image | |
+| tokens | | `foundry_tokens_edit`: place, move |
+| combat | `foundry_combat`: state | `foundry_combat_edit`: start, next_turn, set_initiative, end |
+| journals | `foundry_journals`: search, get | `foundry_journals_edit`: create, write_session_notes |
+| compendium | `foundry_compendium`: search, get, packs, roll_table | |
+| chat | `foundry_chat`: read, roll | |
+| world | `foundry_world`: summary, search, browse, users, refresh | |
+| generate | `foundry_generate`: npc, loot, rule | |
+| history | `foundry_history`: log | `foundry_history_edit`: undo |
+| diagnostics | `foundry_diagnostics`: health, system, search_logs, logs, diagnose | |
+
+That is 11 tools read-only and 18 with writes enabled.
 
 ## Startup behaviour
 
@@ -75,7 +101,7 @@ The server answers Claude's MCP handshake immediately and logs in to Foundry in
 the background, retrying with exponential backoff (1s to 30s, with jitter).
 Tool calls wait up to 45s for the connection. A rejected password (HTTP 401)
 stops retrying and says so. If a reconnect leaves an expired session, the next
-call does a full re-login. `get_health_status` shows connecting / connected /
+call does a full re-login. `foundry_diagnostics` (action `health`) shows connecting / connected /
 login rejected, the last error with a plain-language hint, and how old the
 world data is.
 

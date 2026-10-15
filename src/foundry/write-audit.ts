@@ -38,6 +38,8 @@ export interface AuditEntry {
   undone?: boolean;
   /** Set on the entry produced by an undo; points at the entry it reverted. */
   undoOf?: string;
+  /** Writes made inside one `FoundryClient.withBatch` call share an id and are undone together. */
+  batchId?: string;
 }
 
 export interface UndoOperation {
@@ -46,6 +48,13 @@ export interface UndoOperation {
   parentUuid?: string;
   operation: Record<string, unknown>;
 }
+
+/**
+ * Foundry 14 wire form for removing a key in an update. The `-=key` syntax is
+ * deprecated and removed in v16 (`ForcedDeletion` in foundry.mjs, with
+ * `OPERATOR_IDENTIFIER` = "__$OPERATOR$__").
+ */
+export const FORCED_DELETION = { __$OPERATOR$__: 'ForcedDeletion' } as const;
 
 const MAX_BEFORE_BYTES = 400_000;
 const ID_ALPHABET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -145,13 +154,8 @@ export function planUndo(
       }
       const prev = key.includes('.') ? getPath(before, key) : before[key];
       if (prev === undefined) {
-        if (key.includes('.')) {
-          const parts = key.split('.');
-          const last = parts.pop() as string;
-          restore[[...parts, `-=${last}`].join('.')] = null;
-        } else {
-          restore[`-=${key}`] = null;
-        }
+        // The update added this key; removing it restores the earlier state.
+        restore[key] = { ...FORCED_DELETION };
       } else {
         restore[key] = structuredClone(prev);
       }
@@ -243,6 +247,11 @@ export class WriteAudit {
 
   get(id: string): AuditEntry | undefined {
     return this.entries.find((e) => e.id === id);
+  }
+
+  /** Entries sharing a batch id, newest first. */
+  batch(batchId: string): AuditEntry[] {
+    return [...this.entries].reverse().filter((e) => e.batchId === batchId);
   }
 
   /** Newest first. */

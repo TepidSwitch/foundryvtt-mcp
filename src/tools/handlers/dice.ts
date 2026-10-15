@@ -1,69 +1,37 @@
 /**
- * @fileoverview Dice rolling tool handlers
+ * @fileoverview Dice rolling tool handler
  *
- * Handles dice rolling operations using FoundryVTT's dice system
- * or fallback mechanisms when the API is unavailable.
+ * Rolls through FoundryVTT's dice system, or the local fallback roller when
+ * the API is unavailable (see `FoundryClient.rollDice`).
  */
 
 import type { FoundryClient } from '../../foundry/client.js';
 import { logger } from '../../utils/logger.js';
-// import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
-import { BaseTool, type ToolContext, type ToolResult } from '../base.js';
-import { ROLL_DICE_DESCRIPTION } from '../definitions.js';
+import type { ToolResult } from '../base.js';
 
-/**
- * Dice rolling tool implementation
- */
-export class RollDiceTool extends BaseTool {
-  readonly name = 'roll_dice';
-  readonly description = ROLL_DICE_DESCRIPTION;
-  readonly inputSchema = {
-    type: 'object',
-    properties: {
-      formula: {
-        type: 'string',
-        description: 'Dice formula (e.g., "1d20+5", "3d6")',
-      },
-      reason: {
-        type: 'string',
-        description: 'Optional reason for the roll',
-      },
-    },
-    required: ['formula'],
-  };
+export async function handleRollDice(
+  args: {
+    formula: string;
+    reason?: string | undefined;
+  },
+  foundryClient: FoundryClient,
+): Promise<ToolResult> {
+  const { formula, reason } = args;
 
-  protected async executeValidated(
-    args: Record<string, unknown>,
-    context: ToolContext,
-  ): Promise<ToolResult> {
-    const { formula, reason } = args as { formula: string; reason?: string };
+  logger.info(`Rolling dice: ${formula}${reason ? ` (${reason})` : ''}`);
+  const result = await foundryClient.rollDice(formula, reason);
 
-    logger.info(`Rolling dice: ${formula}${reason ? ` (${reason})` : ''}`);
-    const result = await context.foundryClient.rollDice(formula, reason);
-
-    return this.createTextResponse(`🎲 **Dice Roll Result**
+  return {
+    content: [
+      {
+        type: 'text',
+        text: `🎲 **Dice Roll Result**
 **Formula:** ${result.formula}
 **Total:** ${result.total}
 **Breakdown:** ${result.breakdown}
 ${result.reason ? `**Reason:** ${result.reason}` : ''}
-**Timestamp:** ${result.timestamp}`);
-  }
-}
-
-/**
- * Legacy function for backward compatibility
- * @deprecated Use RollDiceTool class instead
- */
-export async function handleRollDice(
-  args: {
-    formula: string;
-    reason?: string;
-  },
-  foundryClient: FoundryClient,
-): Promise<ToolResult> {
-  const tool = new RollDiceTool();
-  const context: ToolContext = {
-    foundryClient,
+**Timestamp:** ${result.timestamp}`,
+      },
+    ],
   };
-  return tool.execute(args, context);
 }

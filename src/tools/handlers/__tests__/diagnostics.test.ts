@@ -416,7 +416,7 @@ describe('handleGetHealthStatus', () => {
     );
 
     expect(text).toMatch(/stale/i);
-    expect(text).toContain('refresh_world_data');
+    expect(text).toContain('foundry_world');
     // Still rendered — a flagged answer beats no answer.
     expect(text).toContain('**Title:** Test World');
   });
@@ -427,7 +427,7 @@ describe('handleGetHealthStatus', () => {
     );
 
     expect(text).not.toMatch(/stale/i);
-    expect(text).not.toContain('refresh_world_data');
+    expect(text).not.toContain('foundry_world');
   });
 });
 

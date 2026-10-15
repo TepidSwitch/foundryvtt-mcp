@@ -892,7 +892,7 @@ describe('FoundryClient', () => {
 
       expect(after.text).toContain('✅ Connected');
       expect(after.text).toMatch(/stale/i);
-      expect(after.text).toContain('refresh_world_data');
+      expect(after.text).toContain('foundry_world');
     });
 
     it('removes the persistent connect listener on explicit disconnect()', async () => {

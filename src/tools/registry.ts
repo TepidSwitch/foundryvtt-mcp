@@ -1,22 +1,76 @@
 /**
- * @fileoverview Tool registry for the new tool system
+ * @fileoverview Tool registry: the single source of listed and callable tools
  *
- * This module manages tool registration and provides a clean interface
- * for tool execution with automatic validation.
+ * Tools are filtered two ways: by toolset (`FOUNDRY_TOOLSETS`) and by whether
+ * writes are enabled (`FOUNDRY_WRITE_ENABLED`). A filtered-out tool is neither
+ * listed nor callable.
  */
 
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { logger } from '../utils/logger.js';
-import type { Tool, ToolContext, ToolResult } from './base.js';
-import { RollDiceTool } from './handlers/dice.js';
+import {
+  TOOLSETS,
+  type Tool,
+  type ToolAnnotations,
+  type ToolContext,
+  type ToolResult,
+  type Toolset,
+} from './base.js';
+
+/** Toolsets enabled when `FOUNDRY_TOOLSETS` is not set: everything except `script`. */
+export const DEFAULT_TOOLSETS: readonly Toolset[] = TOOLSETS.filter((t) => t !== 'script');
+
+export interface RegistryOptions {
+  /** Expose tools that can mutate the world. */
+  writeEnabled: boolean;
+  /** Toolsets to expose. Defaults to DEFAULT_TOOLSETS. */
+  toolsets?: readonly Toolset[];
+}
+
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: { type: 'object'; [key: string]: unknown };
+  annotations: ToolAnnotations;
+}
+
+/**
+ * Parse a comma-separated `FOUNDRY_TOOLSETS` value. Unknown names are reported
+ * through `onUnknown` and ignored; an empty or missing value means the default.
+ */
+export function parseToolsets(
+  raw: string | undefined,
+  onUnknown?: (name: string) => void,
+): Toolset[] {
+  const names = (raw ?? '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  if (names.length === 0) {
+    return [...DEFAULT_TOOLSETS];
+  }
+  const valid: Toolset[] = [];
+  for (const name of names) {
+    if ((TOOLSETS as readonly string[]).includes(name)) {
+      valid.push(name as Toolset);
+    } else {
+      onUnknown?.(name);
+    }
+  }
+  return valid;
+}
 
 /**
  * Tool registry manages all available tools
  */
 export class ToolRegistry {
   private tools = new Map<string, Tool>();
+  private readonly writeEnabled: boolean;
+  private readonly toolsets: ReadonlySet<Toolset>;
 
-  constructor() {
-    this.registerDefaultTools();
+  constructor(options: RegistryOptions) {
+    this.writeEnabled = options.writeEnabled;
+    this.toolsets = new Set(options.toolsets ?? DEFAULT_TOOLSETS);
   }
 
   /**
@@ -26,9 +80,12 @@ export class ToolRegistry {
     if (this.tools.has(tool.name)) {
       logger.warn(`Tool '${tool.name}' is already registered, replacing...`);
     }
-
     this.tools.set(tool.name, tool);
-    logger.debug(`Registered tool: ${tool.name}`);
+  }
+
+  /** Whether a registered tool is exposed under the current options. */
+  private isEnabled(tool: Tool): boolean {
+    return this.toolsets.has(tool.toolset) && (this.writeEnabled || !tool.requiresWrite);
   }
 
   /**
@@ -42,61 +99,62 @@ export class ToolRegistry {
     const tool = this.tools.get(name);
 
     if (!tool) {
-      throw new Error(`Unknown tool: ${name}`);
+      throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
+    }
+    if (!this.isEnabled(tool)) {
+      throw new McpError(
+        ErrorCode.MethodNotFound,
+        !this.toolsets.has(tool.toolset)
+          ? `Tool '${name}' is disabled: toolset '${tool.toolset}' is not in FOUNDRY_TOOLSETS.`
+          : `Tool '${name}' changes the world and is disabled. Set FOUNDRY_WRITE_ENABLED=true and restart the server to allow it.`,
+      );
     }
 
     return await tool.execute(args, context);
   }
 
   /**
-   * Get all registered tool names
+   * Names of the tools that are exposed
    */
   getToolNames(): string[] {
-    return Array.from(this.tools.keys());
+    return Array.from(this.tools.values())
+      .filter((t) => this.isEnabled(t))
+      .map((t) => t.name);
   }
 
   /**
-   * Get tool definitions for MCP
+   * Definitions of the exposed tools, for ListTools
    */
-  getToolDefinitions(): Array<{
-    name: string;
-    description: string;
-    inputSchema: object;
-  }> {
-    return Array.from(this.tools.values()).map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: tool.inputSchema,
-    }));
+  getToolDefinitions(): ToolDefinition[] {
+    return Array.from(this.tools.values())
+      .filter((t) => this.isEnabled(t))
+      .map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        annotations: tool.annotations,
+      }));
   }
 
   /**
-   * Check if a tool is registered
+   * Check if a tool is registered and exposed
    */
   has(name: string): boolean {
-    return this.tools.has(name);
+    const tool = this.tools.get(name);
+    return tool !== undefined && this.isEnabled(tool);
   }
 
   /**
-   * Get a specific tool instance
+   * Get a registered tool, exposed or not
    */
   get(name: string): Tool | undefined {
     return this.tools.get(name);
   }
 
   /**
-   * Register all default tools
+   * All registered tools regardless of filtering (for tests and docs)
    */
-  private registerDefaultTools(): void {
-    // Register the dice tool (converted to new system)
-    this.register(new RollDiceTool());
-
-    // TODO: Register other tools as they are converted
-    logger.info(`Registered ${this.tools.size} tools`);
+  getAll(): Tool[] {
+    return Array.from(this.tools.values());
   }
 }
-
-/**
- * Global tool registry instance
- */
-export const toolRegistry = new ToolRegistry();

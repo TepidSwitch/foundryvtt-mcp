@@ -28,8 +28,8 @@ bun run test-connection # Test MCP→FoundryVTT connection
 
 ### Data Flow
 
-1. AI assistant calls MCP tool → `src/tools/router.ts`
-2. Router dispatches to handler → `src/tools/handlers/`
+1. AI assistant calls MCP tool → `ToolRegistry` (`src/tools/registry.ts`), filtered by `FOUNDRY_TOOLSETS` and `FOUNDRY_WRITE_ENABLED`
+2. The domain tool (`src/tools/domains/*.ts`, built on `src/tools/domain.ts`) validates `action` + fields with Zod and calls a handler in `src/tools/handlers/`
 3. Handler queries cached worldData → `src/foundry/client.ts`
 4. Response returned as MCP result
 
@@ -40,8 +40,8 @@ bun run test-connection # Test MCP→FoundryVTT connection
 | Client | `src/foundry/client.ts` | Socket.IO connection, world state cache |
 | Auth | `src/foundry/auth.ts` | 4-step Socket.IO authentication |
 | Config | `src/config/index.ts` | Zod-validated environment config |
-| Tools | `src/tools/definitions.ts` | MCP tool schemas |
-| Router | `src/tools/router.ts` | Request→handler dispatch |
+| Domain tools | `src/tools/domains/` | One `DomainTool` per domain (`foundry_<domain>` read, `foundry_<domain>_edit` write); each action = Zod schema + handler |
+| Registry | `src/tools/registry.ts` | Single source of listed/callable tools; toolset and write filtering |
 | Types | `src/foundry/types.ts` | FoundryVTT entity interfaces |
 
 ### Authentication & transport selection
@@ -72,11 +72,11 @@ bun run test-connection # Test MCP→FoundryVTT connection
 
 ## Live checks
 
-`just live-check --read` (or `npx tsx scripts/live-check.ts ...` if `just` isn't installed) spawns the built `dist/index.js` and talks to the real world like Claude Desktop does. Run `npm run build` first.
+`just live-check --read` (`just` strips the quotes from the JSON in `--call`, so use `npx tsx scripts/live-check.ts --call ...` for those) spawns the built `dist/index.js` and talks to the real world like Claude Desktop does. Run `npm run build` first.
 
 - `--read`: users, world summary, health (read-only, safe anytime)
 - `--dry-run --call <tool> '<json>'`: sets `FOUNDRY_DRY_RUN=true`, writes are simulated
-- `--call <tool> '<json>'`: real call; write checks only on documents named `MCP TEST — delete me`, then `undo_last_write` and search to confirm nothing is left
+- `--call <tool> '<json>'` (tool names are the `foundry_*` domain tools; the json carries `action`): real call; write checks only on documents named `MCP TEST — delete me`, then `foundry_history_edit` undo and search to confirm nothing is left
 
 Foundry and dnd5e client source for checking field names lives outside the repo at `~/foundry-dev/foundry/` (licensed, never commit).
 

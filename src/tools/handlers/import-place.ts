@@ -47,7 +47,7 @@ function resolveFolder(snapshot: WorldData, ref: string, packType: string): stri
     ErrorCode.InvalidParams,
     named.length > 1
       ? `"${ref}" matches ${named.length} ${type} folders — pass a folder id`
-      : `No ${type} folder matches "${ref}". Folders are not created automatically; see browse_world kind="folders" folder_type="${type}".`,
+      : `No ${type} folder matches "${ref}". Folders are not created automatically; see foundry_world browse kind="folders" folder_type="${type}".`,
   );
 }
 
@@ -70,7 +70,7 @@ export async function handleImportFromCompendium(
   if (!compendiumId || typeof compendiumId !== 'string') {
     throw new McpError(
       ErrorCode.InvalidParams,
-      'compendiumId is required (see search_compendium or browse_world kind="packs")',
+      'compendiumId is required (see foundry_compendium search or packs)',
     );
   }
   if (!documentId && !name) {
@@ -143,7 +143,7 @@ export async function handleImportFromCompendium(
           text: `✅ Imported **${created.name}** (${created.type}) ${where}
 New id: \`${created.id}\` · from \`${compendiumId}\` / \`${id}\`
 ${existing.length > 0 ? `\n⚠️ ${existing.length} document(s) named "${wanted}" already existed, so this is an additional copy.\n` : ''}
-Nothing existing was modified. To undo, delete the new document in Foundry${target ? ' (or with delete_actor_item)' : ''}.`,
+Nothing existing was modified. To undo, delete the new document in Foundry${target ? ' (or with foundry_items_edit remove_from_actor)' : ''}.`,
         },
       ],
     };

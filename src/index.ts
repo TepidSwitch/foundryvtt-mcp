@@ -34,11 +34,13 @@ import { DiagnosticsClient } from './diagnostics/client.js';
 import { FoundryClient, type FoundryClientConfig } from './foundry/client.js';
 import { ConnectionManager, setConnectionStatusProvider } from './foundry/connection-manager.js';
 import { defaultAuditPath } from './foundry/write-audit.js';
+import type { ToolContext } from './tools/base.js';
 import {
+  createToolRegistry,
   getAllResources,
-  getAllTools,
+  parseToolsets,
   routeResourceRequest,
-  routeToolRequest,
+  type ToolRegistry,
 } from './tools/index.js';
 import { DiagnosticSystem } from './utils/diagnostics.js';
 import { logger } from './utils/logger.js';
@@ -53,6 +55,7 @@ class FoundryMCPServer {
   private connection: ConnectionManager;
   private diagnosticsClient: DiagnosticsClient;
   private diagnosticSystem: DiagnosticSystem;
+  private registry: ToolRegistry;
 
   /**
    * Creates a new FoundryMCPServer instance.
@@ -109,6 +112,14 @@ class FoundryMCPServer {
     // Initialize DiagnosticSystem
     this.diagnosticSystem = new DiagnosticSystem(this.foundryClient);
 
+    // Tools exposed depend on FOUNDRY_WRITE_ENABLED and FOUNDRY_TOOLSETS.
+    this.registry = createToolRegistry({
+      writeEnabled: config.foundry.writeEnabled,
+      toolsets: parseToolsets(config.foundry.toolsets, (name) =>
+        logger.warn(`Ignoring unknown toolset '${name}' in FOUNDRY_TOOLSETS`),
+      ),
+    });
+
     this.setupHandlers();
   }
 
@@ -121,7 +132,7 @@ class FoundryMCPServer {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       logger.info('Listing available tools');
       return {
-        tools: getAllTools(),
+        tools: this.registry.getToolDefinitions(),
       };
     });
 
@@ -140,18 +151,18 @@ class FoundryMCPServer {
 
       try {
         // Handshake is already done; wait for (or re-establish) the Foundry link.
-        // The health tool must answer even while disconnected — it explains why.
-        if (name !== 'get_health_status') {
+        // The health action must answer even while disconnected — it explains why.
+        const isHealthCheck = name === 'foundry_diagnostics' && args?.action === 'health';
+        if (!isHealthCheck) {
           await this.connection.ensureConnected();
         }
+        const context: ToolContext = {
+          foundryClient: this.foundryClient,
+          diagnosticsClient: this.diagnosticsClient,
+          diagnosticSystem: this.diagnosticSystem,
+        };
         const route = () =>
-          routeToolRequest(
-            name,
-            args || {},
-            this.foundryClient,
-            this.diagnosticsClient,
-            this.diagnosticSystem,
-          ) as Promise<CallToolResult>;
+          this.registry.execute(name, args || {}, context) as Promise<CallToolResult>;
         const dryBefore = this.foundryClient.getDryRunWriteCount();
         const withDryRunBanner = (result: CallToolResult): CallToolResult => {
           if (this.foundryClient.getDryRunWriteCount() === dryBefore) {
@@ -174,7 +185,7 @@ class FoundryMCPServer {
           // The link dropped before the request was sent (safe to repeat, even
           // for writes): re-establish it and try exactly once more.
           if (
-            name !== 'get_health_status' &&
+            !isHealthCheck &&
             error instanceof Error &&
             /not connected|Not connected/.test(error.message)
           ) {

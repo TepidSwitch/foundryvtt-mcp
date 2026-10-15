@@ -96,6 +96,49 @@ describe('write audit + undo', () => {
     expect(sent.operation.ids).toEqual([journal._id]);
   });
 
+  it('undoes every write of a batch together, newest first', async () => {
+    const { client, emitted } = setup();
+    await client.withBatch(async () => {
+      await client.createJournalEntry('One', [{ name: 'p', content: 'x' }]);
+      await client.createJournalEntry('Two', [{ name: 'p', content: 'y' }]);
+    });
+    await client.createJournalEntry('Outside', [{ name: 'p', content: 'z' }]);
+    const [outside, two, one] = client.audit.list(3);
+    expect(one?.batchId).toBeDefined();
+    expect(two?.batchId).toBe(one?.batchId);
+    expect(outside?.batchId).toBeUndefined();
+
+    // Undoing by the older batch member reverts both batch writes, not the later one.
+    const sentBefore = emitted.length;
+    const { message } = await client.undoWrite(one?.id);
+    expect(message).toContain('batch of 2 writes');
+    const deletes = (
+      emitted.slice(sentBefore) as Array<{ action: string; operation: { ids: string[] } }>
+    ).map((p) => [p.action, p.operation.ids]);
+    expect(deletes).toEqual([
+      ['delete', two?.ids],
+      ['delete', one?.ids],
+    ]);
+    expect(client.audit.get(one?.id ?? '')?.undone).toBe(true);
+    expect(client.audit.get(two?.id ?? '')?.undone).toBe(true);
+    expect(client.audit.get(outside?.id ?? '')?.undone).toBeUndefined();
+  });
+
+  it('sends nothing when part of a batch cannot be undone', async () => {
+    const { client, emitted } = setup();
+    await client.withBatch(async () => {
+      await client.createJournalEntry('One', [{ name: 'p', content: 'x' }]);
+      await client.updateActorAttribute(ACTOR, { 'currency.gp': 3 });
+    });
+    const update = client.audit.list(1)[0];
+    if (update) {
+      delete update.before;
+    }
+    const sentBefore = emitted.length;
+    await expect(client.undoWrite()).rejects.toThrow(/Cannot undo/);
+    expect(emitted).toHaveLength(sentBefore);
+  });
+
   it('dry run sends nothing, logs the intent and counts it', async () => {
     const { client, emitted } = setup({ dryRun: true });
     const journal = await client.createJournalEntry('Recap', [{ name: 'p', content: 'x' }]);
@@ -132,7 +175,7 @@ describe('planUndo', () => {
       before: [{ _id: ACTOR, flags: {} }],
     });
     expect(upd.ok && upd.op.operation).toMatchObject({
-      updates: [{ _id: ACTOR, 'flags.x.-=new': null }],
+      updates: [{ _id: ACTOR, 'flags.x.new': { __$OPERATOR$__: 'ForcedDeletion' } }],
     });
   });
   it('refuses when state was not captured', () => {

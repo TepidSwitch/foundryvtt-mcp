@@ -1,16 +1,13 @@
 /**
- * @fileoverview Base tool interface and implementation
+ * @fileoverview Shared tool types
  *
- * This module provides the foundation for the tool system with automatic
- * schema validation and consistent interface design.
+ * Tool contract used by the registry (`registry.ts`) and the domain-tool
+ * implementation (`domain.ts`).
  */
 
-import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
-import Ajv from 'ajv';
 import type { DiagnosticsClient } from '../diagnostics/client.js';
 import type { FoundryClient } from '../foundry/client.js';
 import type { DiagnosticSystem } from '../utils/diagnostics.js';
-import { logger } from '../utils/logger.js';
 
 /**
  * Tool execution context containing all necessary dependencies
@@ -38,6 +35,42 @@ export interface ToolResult {
 }
 
 /**
+ * MCP tool annotations (hints for clients; not enforced).
+ */
+export interface ToolAnnotations {
+  title?: string;
+  readOnlyHint: boolean;
+  destructiveHint: boolean;
+  idempotentHint: boolean;
+  openWorldHint: boolean;
+}
+
+/**
+ * Toolsets selectable with `FOUNDRY_TOOLSETS`. `script` is reserved for the
+ * code-mode tool and is off unless named explicitly.
+ */
+export const TOOLSETS = [
+  'actors',
+  'items',
+  'effects',
+  'scenes',
+  'tokens',
+  'combat',
+  'journals',
+  'compendium',
+  'audio',
+  'chat',
+  'world',
+  'files',
+  'generate',
+  'history',
+  'diagnostics',
+  'script',
+] as const;
+
+export type Toolset = (typeof TOOLSETS)[number];
+
+/**
  * Base interface for all tools
  */
 export interface Tool {
@@ -47,106 +80,23 @@ export interface Tool {
   /** Tool description */
   readonly description: string;
 
-  /** JSON Schema for input validation */
-  readonly inputSchema: object;
+  /** JSON Schema for the tool's input */
+  readonly inputSchema: { type: 'object'; [key: string]: unknown };
+
+  /** MCP annotations */
+  readonly annotations: ToolAnnotations;
+
+  /** Toolset this tool belongs to */
+  readonly toolset: Toolset;
+
+  /** True when the tool can mutate the world (hidden unless writes are enabled) */
+  readonly requiresWrite: boolean;
 
   /**
-   * Execute the tool with validated arguments
-   * @param args - Validated input arguments
+   * Execute the tool with raw arguments (validated by the tool itself)
+   * @param args - Input arguments
    * @param context - Tool execution context
    * @returns Tool execution result
    */
   execute(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult>;
-}
-
-/**
- * Base tool class with automatic validation
- */
-export abstract class BaseTool implements Tool {
-  private static readonly ajv = new Ajv({
-    allErrors: true,
-    verbose: true,
-    strict: true,
-  });
-
-  abstract readonly name: string;
-  abstract readonly description: string;
-  abstract readonly inputSchema: object;
-
-  /**
-   * Execute the tool with automatic validation
-   */
-  async execute(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
-    logger.debug(`Executing tool: ${this.name}`, { args });
-
-    // Validate input arguments against schema
-    this.validateArgs(args);
-
-    try {
-      return await this.executeValidated(args, context);
-    } catch (error) {
-      logger.error(`Tool execution failed: ${this.name}`, error);
-
-      if (error instanceof McpError) {
-        throw error;
-      }
-
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Tool execution failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      );
-    }
-  }
-
-  /**
-   * Execute the tool with validated arguments (must be implemented by subclasses)
-   */
-  protected abstract executeValidated(
-    args: Record<string, unknown>,
-    context: ToolContext,
-  ): Promise<ToolResult>;
-
-  /**
-   * Validate arguments against the tool's schema
-   */
-  private validateArgs(args: Record<string, unknown>): void {
-    const validate = BaseTool.ajv.compile(this.inputSchema);
-    const valid = validate(args);
-
-    if (!valid) {
-      const errors =
-        validate.errors
-          ?.map((err) => {
-            const instancePath = err.instancePath || 'root';
-            return `${instancePath}: ${err.message}`;
-          })
-          .join(', ') || 'Unknown validation error';
-
-      throw new McpError(
-        ErrorCode.InvalidParams,
-        `Invalid parameters for tool '${this.name}': ${errors}`,
-      );
-    }
-  }
-
-  /**
-   * Helper method to create a text response
-   */
-  protected createTextResponse(text: string): ToolResult {
-    return {
-      content: [
-        {
-          type: 'text',
-          text,
-        },
-      ],
-    };
-  }
-
-  /**
-   * Helper method to create an error response
-   */
-  protected createErrorResponse(error: Error): ToolResult {
-    return this.createTextResponse(`❌ **Error**: ${error.message}`);
-  }
 }

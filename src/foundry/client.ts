@@ -230,6 +230,7 @@ export class FoundryClient {
   readonly audit: WriteAudit;
   private dryRunWrites = 0;
   private currentUndoOf: string | null = null;
+  private currentBatchId: string | null = null;
   /**
    * Last observed outcome of a REST request: false once one failed to reach
    * FoundryVTT at all (#217). Unused in Socket.IO mode.
@@ -586,29 +587,65 @@ export class FoundryClient {
     return this.dryRunWrites;
   }
 
-  /** Reverses a logged write (best effort, see write-audit.ts). */
+  /**
+   * Runs `fn` so that every write it makes shares one batch id; undoing any
+   * write of the batch undoes the whole batch. Batches do not nest.
+   */
+  async withBatch<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.currentBatchId) {
+      return fn();
+    }
+    this.currentBatchId = `b-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      return await fn();
+    } finally {
+      this.currentBatchId = null;
+    }
+  }
+
+  /**
+   * Reverses a logged write (best effort, see write-audit.ts). When the write
+   * belongs to a batch, every not-yet-undone write of that batch is reversed,
+   * newest first; nothing is sent unless all of them can be planned.
+   */
   async undoWrite(id?: string): Promise<{ undone: AuditEntry; message: string }> {
     this.assertWriteable();
     const entry = id ? this.audit.get(id) : this.audit.lastUndoable();
     if (!entry) {
       throw new Error(id ? `No write with id ${id}` : 'There is no write to undo');
     }
-    const plan = planUndo(entry);
-    if (!plan.ok) {
-      throw new Error(`Cannot undo ${entry.id}: ${plan.reason}`);
+    const entries = entry.batchId
+      ? this.audit.batch(entry.batchId).filter((e) => !e.undone && !e.dryRun && !e.undoOf)
+      : [entry];
+    const plans = entries.map((e) => ({ entry: e, plan: planUndo(e) }));
+    for (const { entry: e, plan } of plans) {
+      if (!plan.ok) {
+        throw new Error(`Cannot undo ${e.id}: ${plan.reason}`);
+      }
     }
-    // The reversal is itself logged, linked to the entry it reverts.
-    this.currentUndoOf = entry.id;
-    let result: unknown[];
-    try {
-      result = await this.modifyDocument(plan.op.type, plan.op.action, plan.op.operation);
-    } finally {
-      this.currentUndoOf = null;
+
+    const messages: string[] = [];
+    for (const { entry: e, plan } of plans) {
+      if (!plan.ok) {
+        continue;
+      }
+      // The reversal is itself logged, linked to the entry it reverts.
+      this.currentUndoOf = e.id;
+      let result: unknown[];
+      try {
+        result = await this.modifyDocument(plan.op.type, plan.op.action, plan.op.operation);
+      } finally {
+        this.currentUndoOf = null;
+      }
+      this.audit.markUndone(e.id);
+      messages.push(`${plan.op.action} ${plan.op.type} (${result.length} document(s))`);
     }
-    this.audit.markUndone(entry.id);
     return {
       undone: entry,
-      message: `${plan.op.action} ${plan.op.type} (${result.length} document(s))`,
+      message:
+        messages.length === 1
+          ? (messages[0] as string)
+          : `batch of ${messages.length} writes: ${messages.join('; ')}`,
     };
   }
 
@@ -1214,6 +1251,7 @@ export class FoundryClient {
             : touchedIds,
         names: namesOf(action === 'create' ? opData : before),
         dryRun: true,
+        ...(this.currentBatchId ? { batchId: this.currentBatchId } : {}),
       });
       return placeholder as unknown[];
     }
@@ -1241,6 +1279,7 @@ export class FoundryClient {
           : touchedIds,
       names: namesOf(action === 'create' ? (result as Array<Record<string, unknown>>) : before),
       ...(this.currentUndoOf ? { undoOf: this.currentUndoOf } : {}),
+      ...(this.currentBatchId ? { batchId: this.currentBatchId } : {}),
       ...(action === 'update' ? { updates: opUpdates } : {}),
       ...(before && before.length > 0 ? { before } : {}),
     });

@@ -2,21 +2,21 @@
  * Tools module entry point
  */
 
-// Export tool and resource definitions
-export { getAllTools } from './definitions.js';
-export * from './handlers/actors.js';
-export * from './handlers/chat.js';
-export * from './handlers/combat.js';
-export * from './handlers/diagnostics.js';
-// Export individual handlers for testing
-export * from './handlers/dice.js';
-export * from './handlers/generation.js';
-export * from './handlers/items.js';
-export * from './handlers/journals.js';
-export * from './handlers/resources.js';
-export * from './handlers/scenes.js';
-export * from './handlers/users.js';
-export * from './handlers/world.js';
+import { ALL_DOMAIN_TOOLS } from './domains/index.js';
+import { type RegistryOptions, ToolRegistry } from './registry.js';
+
+export { handleReadResource as routeResourceRequest } from './handlers/resources.js';
+export { DEFAULT_TOOLSETS, parseToolsets, ToolRegistry } from './registry.js';
 export { getAllResources } from './resources.js';
-// Export routing functions
-export { routeResourceRequest, routeToolRequest } from './router.js';
+
+/**
+ * Build the registry with every domain tool registered; the options decide
+ * which of them are exposed.
+ */
+export function createToolRegistry(options: RegistryOptions): ToolRegistry {
+  const registry = new ToolRegistry(options);
+  for (const tool of ALL_DOMAIN_TOOLS) {
+    registry.register(tool);
+  }
+  return registry;
+}

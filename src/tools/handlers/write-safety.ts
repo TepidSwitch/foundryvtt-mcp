@@ -27,7 +27,7 @@ export async function handleGetWriteLog(args: { limit?: number }, foundryClient:
       content: [
         {
           type: 'text',
-          text: `🧾 **Recent writes** (newest first)\n${lines.join('\n')}\n\nUndo the newest with undo_last_write, or pass write_id.`,
+          text: `🧾 **Recent writes** (newest first)\n${lines.join('\n')}\n\nUndo the newest with foundry_history_edit undo, or pass write_id.`,
         },
       ],
     };

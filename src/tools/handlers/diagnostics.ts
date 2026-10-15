@@ -29,7 +29,7 @@ const DEFAULT_SEARCH_LIMIT = 50;
  */
 const STALE_WORLD_DATA_NOTICE =
   '⚠️ **Stale:** this snapshot stopped following live changes when the connection dropped, ' +
-  'and document changes made since are missing. Run `refresh_world_data` to resync.';
+  'and document changes made since are missing. Run `foundry_world` action refresh to resync.';
 
 /**
  * Handles recent log retrieval requests

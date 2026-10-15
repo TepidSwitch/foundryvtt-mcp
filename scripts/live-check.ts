@@ -38,9 +38,9 @@ function parseArgs(argv: string[]): { calls: Call[]; dryRun: boolean } {
       dryRun = true;
     } else if (arg === '--read') {
       calls.push(
-        { name: 'get_users', args: {} },
-        { name: 'get_world_summary', args: {} },
-        { name: 'get_health_status', args: {} },
+        { name: 'foundry_world', args: { action: 'users' } },
+        { name: 'foundry_world', args: { action: 'summary' } },
+        { name: 'foundry_diagnostics', args: { action: 'health' } },
       );
     } else if (arg === '--call') {
       const name = argv[++i];
