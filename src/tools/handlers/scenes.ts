@@ -335,11 +335,15 @@ export async function handleGetSceneInfo(
       .slice(0, 40)
       .map(
         (t) =>
-          `- ${str(t.name) || 'Unnamed'} (${disp[num(t.disposition)] ?? 'unknown'}${t.hidden === true ? ', hidden' : ''}${t.actorLink === true ? ', linked' : ''}) at ${Math.round(num(t.x) / f.gridSize)},${Math.round(num(t.y) / f.gridSize)}`,
+          `- ${str(t.name) || 'Unnamed'} \`${str(t._id)}\` (${disp[num(t.disposition)] ?? 'unknown'}${t.hidden === true ? ', hidden' : ''}${t.actorLink === true ? ', linked' : ''}) at ${Math.round(num(t.x) / f.gridSize)},${Math.round(num(t.y) / f.gridSize)}`,
       );
     const notes = (Array.isArray(scene.notes) ? scene.notes : []).slice(0, 30).map((n) => {
       const entry = snapshot.journal.find((j) => j._id === n.entryId);
-      return `- ${str(n.text) || '(no label)'}${entry ? ` → journal "${entry.name}"` : ''}`;
+      return `- ${str(n.text) || '(no label)'} \`${str(n._id)}\`${entry ? ` → journal "${entry.name}"` : ''}`;
+    });
+    const lights = (Array.isArray(scene.lights) ? scene.lights : []).slice(0, 30).map((l) => {
+      const cfg = at(l, 'config');
+      return `- ${str((l as Rec).name) || 'light'} \`${str((l as Rec)._id)}\` bright ${num(at(cfg, 'bright'))}, dim ${num(at(cfg, 'dim'))}`;
     });
 
     const journalId = str((scene as unknown as Rec).journal);
@@ -367,6 +371,9 @@ ${tokenLines.join('\n') || 'none'}${tokens.length > 40 ? `\n…and ${tokens.leng
 
 **Map notes** (${f.notes})
 ${notes.join('\n') || 'none'}
+
+**Lights** (${f.lights})
+${lights.join('\n') || 'none'}
 
 _Use foundry_scenes image to see the map itself._`,
         },

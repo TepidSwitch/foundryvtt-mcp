@@ -14,7 +14,7 @@ import { generateTool } from './generate.js';
 import { historyEditTool, historyTool } from './history.js';
 import { itemsEditTool, itemsTool } from './items.js';
 import { journalsEditTool, journalsTool } from './journals.js';
-import { scenesTool, tokensEditTool } from './scenes.js';
+import { scenesEditTool, scenesTool, tokensEditTool } from './scenes.js';
 import { worldTool } from './world.js';
 
 export const ALL_DOMAIN_TOOLS: Tool[] = [
@@ -24,6 +24,7 @@ export const ALL_DOMAIN_TOOLS: Tool[] = [
   itemsEditTool,
   effectsEditTool,
   scenesTool,
+  scenesEditTool,
   tokensEditTool,
   combatTool,
   combatEditTool,

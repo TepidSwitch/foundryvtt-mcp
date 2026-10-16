@@ -6,6 +6,14 @@ import { z } from 'zod';
 import { action, DomainTool } from '../domain.js';
 import { handlePlaceActorOnScene } from '../handlers/import-place.js';
 import {
+  handleActivateScene,
+  handleAddLight,
+  handleAddNote,
+  handleRemoveLight,
+  handleRemoveNote,
+  handleUpdateScene,
+} from '../handlers/scene-mutations.js';
+import {
   handleGetSceneImage,
   handleGetSceneInfo,
   handleSearchScenes,
@@ -147,6 +155,107 @@ export const tokensEditTool = new DomainTool({
         sceneId: z.string().optional().describe('Scene to look in'),
       }),
       run: (a, ctx) => handleMoveToken(a, ctx.foundryClient),
+    }),
+  },
+});
+
+const sceneRef = z.string().describe('Scene id or name (partial ok)');
+const col = z
+  .number()
+  .describe('Grid column from the left of the map image (0-based; fractions move within a square)');
+const row = z
+  .number()
+  .describe('Grid row from the top of the map image (0-based; fractions move within a square)');
+
+export const scenesEditTool = new DomainTool({
+  name: 'foundry_scenes_edit',
+  title: 'Edit scenes',
+  toolset: 'scenes',
+  write: true,
+  destructive: true,
+  description:
+    'WRITE: activate scenes, change scene settings, and add or remove map notes and lights in the live world. Positions are grid squares from the top-left of the map image. Needs FOUNDRY_WRITE_ENABLED=true and a GM login; writes are logged and revertible with foundry_history_edit. Note and light ids are shown by foundry_scenes get.',
+  actions: {
+    activate: action({
+      description:
+        'Make a scene the active scene: players are moved to it and any other active scene is deactivated.',
+      schema: z.object({ scene: sceneRef }),
+      run: (a, ctx) => handleActivateScene(a, ctx.foundryClient),
+    }),
+    update: action({
+      description:
+        'Change scene settings: name, darkness (0 = day, 1 = night), global_light, navigation (show in the scene bar) and nav_name, token_vision, fog_exploration, and the grid (grid_size in pixels, grid_distance and grid_units per square). Only the settings you give change.',
+      schema: z.object({
+        scene: sceneRef,
+        name: z.string().optional().describe('New scene name'),
+        darkness: z.number().min(0).max(1).optional().describe('Darkness level 0-1'),
+        global_light: z.boolean().optional().describe('Global illumination on or off'),
+        navigation: z.boolean().optional().describe('Show in the navigation bar'),
+        nav_name: z.string().optional().describe('Name shown in the navigation bar'),
+        token_vision: z.boolean().optional().describe('Enable token vision'),
+        fog_exploration: z.boolean().optional().describe('Remember explored areas'),
+        grid_size: z
+          .number()
+          .int()
+          .min(50)
+          .optional()
+          .describe('Grid square size in pixels (min 50)'),
+        grid_distance: z.number().positive().optional().describe('Distance of one square, e.g. 5'),
+        grid_units: z.string().optional().describe('Distance unit, e.g. "ft"'),
+      }),
+      run: (a, ctx) => handleUpdateScene(a, ctx.foundryClient),
+    }),
+    add_note: action({
+      description:
+        'Pin a map note at a grid square, optionally linked to a journal entry (and one of its pages) so players can open it from the map.',
+      schema: z.object({
+        scene: sceneRef,
+        x: col,
+        y: row,
+        journal: z.string().optional().describe('Journal entry id or name to link'),
+        page: z.string().optional().describe('Page id or name of that journal (needs journal)'),
+        text: z.string().optional().describe('Label shown on the map'),
+        icon_size: z.number().int().min(32).optional().describe('Icon size in pixels (default 40)'),
+        font_size: z.number().int().min(8).max(128).optional().describe('Label size (default 32)'),
+        global: z.boolean().optional().describe('Visible even outside line of sight'),
+      }),
+      run: (a, ctx) => handleAddNote(a, ctx.foundryClient),
+    }),
+    remove_note: action({
+      description: 'Remove a map note by id or exact label.',
+      schema: z.object({
+        scene: sceneRef,
+        note: z.string().describe('Note id or exact label (ids: foundry_scenes get)'),
+      }),
+      run: (a, ctx) => handleRemoveNote(a, ctx.foundryClient),
+    }),
+    add_light: action({
+      description:
+        'Add an ambient light at a grid square. bright and dim are radii in scene distance units (defaults 10 and 20 if neither is given); color is a hex string; angle < 360 makes a cone aimed by rotation.',
+      schema: z.object({
+        scene: sceneRef,
+        x: col,
+        y: row,
+        name: z.string().optional().describe('Label for the light'),
+        bright: z.number().min(0).optional().describe('Bright radius'),
+        dim: z.number().min(0).optional().describe('Dim radius'),
+        color: z.string().optional().describe('Light colour, e.g. "#ffaa55"'),
+        angle: z.number().min(0).max(360).optional().describe('Emission angle (default 360)'),
+        alpha: z.number().min(0).max(1).optional().describe('Colour intensity 0-1'),
+        rotation: z.number().optional().describe('Direction in degrees for a cone'),
+        walls: z.boolean().optional().describe('Blocked by walls (default true)'),
+        vision: z.boolean().optional().describe('Also grants vision'),
+        hidden: z.boolean().optional().describe('Switched off'),
+      }),
+      run: (a, ctx) => handleAddLight(a, ctx.foundryClient),
+    }),
+    remove_light: action({
+      description: 'Remove an ambient light by id or exact name.',
+      schema: z.object({
+        scene: sceneRef,
+        light: z.string().describe('Light id or exact name (ids: foundry_scenes get)'),
+      }),
+      run: (a, ctx) => handleRemoveLight(a, ctx.foundryClient),
     }),
   },
 });

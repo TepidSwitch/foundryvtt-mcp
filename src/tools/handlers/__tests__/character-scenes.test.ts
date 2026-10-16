@@ -272,7 +272,7 @@ describe('scene tools', () => {
 
   it('shows tokens and readiness in scene info', async () => {
     const out = text(await handleGetSceneInfo({ name: 'Jade Temple' }, client));
-    expect(out).toContain('Cultist (hostile)');
+    expect(out).toMatch(/Cultist `\w*` \(hostile\)/);
     expect(out).toContain('Dako / Temples');
     expect(out).toContain('Readiness');
   });
