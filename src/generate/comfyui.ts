@@ -1,0 +1,243 @@
+/**
+ * @fileoverview Minimal ComfyUI HTTP client and the D&D battlemap SDXL workflow
+ *
+ * Adapted from the foundry-vtt-mcp bridge by adambdooley (MIT licence): the
+ * `/prompt`, `/history`, `/queue` and `/view` calls and the SDXL battlemap
+ * workflow. The bridge's install/start/stop service management is dropped on
+ * purpose: ComfyUI runs on another machine (for example a Windows desktop with
+ * a GPU) and this server only talks to it over HTTP.
+ */
+
+import axios from 'axios';
+
+export interface MapWorkflowInput {
+  prompt: string;
+  width: number;
+  height: number;
+  seed?: number;
+  quality?: 'low' | 'medium' | 'high';
+}
+
+export interface ComfyUIOptions {
+  baseUrl: string;
+  checkpoint: string;
+  vae: string;
+  /** Replaceable in tests. */
+  http?: HttpLike;
+}
+
+/** The subset of axios used here. */
+export interface HttpLike {
+  get<T = unknown>(
+    url: string,
+    config?: Record<string, unknown>,
+  ): Promise<{ data: T; status?: number }>;
+  post<T = unknown>(
+    url: string,
+    body?: unknown,
+    config?: Record<string, unknown>,
+  ): Promise<{ data: T; status?: number }>;
+}
+
+export interface ComfyUIImageRef {
+  filename: string;
+  subfolder: string;
+  type: string;
+}
+
+export type ComfyUIJobState = 'queued' | 'running' | 'complete' | 'failed' | 'unknown';
+
+export interface ComfyUIHealth {
+  available: boolean;
+  responseTimeMs?: number;
+  gpu?: string;
+  error?: string;
+}
+
+export const SIZE_PIXELS = { small: 1024, medium: 1536, large: 2048 } as const;
+export type MapSize = keyof typeof SIZE_PIXELS;
+
+const STEPS = { low: 8, medium: 20, high: 35 } as const;
+
+/**
+ * The bridge's battlemap workflow: positive prompt carries the model's trigger
+ * words, negative prompt keeps out grids, people and perspective.
+ */
+export function buildWorkflow(
+  input: MapWorkflowInput,
+  models: { checkpoint: string; vae: string },
+): Record<string, unknown> {
+  const positive = `2d DnD battlemap of ${input.prompt}, top-down view, overhead perspective, aerial`;
+  const negative =
+    'grid, low angle, isometric, oblique, horizon, text, watermark, logo, caption, people, creatures, monsters, blurry, artifacts';
+  const steps = STEPS[input.quality ?? 'low'];
+  return {
+    '1': { inputs: { ckpt_name: models.checkpoint }, class_type: 'CheckpointLoaderSimple' },
+    '2': { inputs: { text: positive, clip: ['1', 1] }, class_type: 'CLIPTextEncode' },
+    '3': { inputs: { text: negative, clip: ['1', 1] }, class_type: 'CLIPTextEncode' },
+    '4': {
+      inputs: { width: input.width, height: input.height, batch_size: 1 },
+      class_type: 'EmptyLatentImage',
+    },
+    '5': {
+      inputs: {
+        seed: input.seed ?? Math.floor(Math.random() * 1_000_000),
+        steps,
+        cfg: 2.5,
+        denoise: 1.0,
+        sampler_name: 'dpmpp_2m_sde',
+        scheduler: 'karras',
+        model: ['1', 0],
+        positive: ['2', 0],
+        negative: ['3', 0],
+        latent_image: ['4', 0],
+      },
+      class_type: 'KSampler',
+    },
+    '9': { inputs: { vae_name: models.vae }, class_type: 'VAELoader' },
+    '6': { inputs: { samples: ['5', 0], vae: ['9', 0] }, class_type: 'VAEDecode' },
+    '7': { inputs: { filename_prefix: 'battlemap', images: ['6', 0] }, class_type: 'SaveImage' },
+  };
+}
+
+function describeError(error: unknown): string {
+  if (axios.isAxiosError(error)) {
+    if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND' || error.code === 'ETIMEDOUT') {
+      return `cannot reach ComfyUI (${error.code})`;
+    }
+    const detail = error.response?.data;
+    const text = typeof detail === 'string' ? detail : detail ? JSON.stringify(detail) : '';
+    return `${error.message}${text ? `: ${text.slice(0, 300)}` : ''}`;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
+export class ComfyUIClient {
+  readonly baseUrl: string;
+  private readonly http: HttpLike;
+  private readonly clientId = `foundryvtt-mcp-${Math.random().toString(36).slice(2, 10)}`;
+
+  constructor(private readonly options: ComfyUIOptions) {
+    this.baseUrl = options.baseUrl.replace(/\/+$/, '');
+    this.http = options.http ?? (axios.create({ baseURL: this.baseUrl }) as unknown as HttpLike);
+  }
+
+  async checkHealth(): Promise<ComfyUIHealth> {
+    const started = Date.now();
+    try {
+      const { data } = await this.http.get<{ devices?: Array<{ name?: string }> }>(
+        '/system_stats',
+        {
+          timeout: 5000,
+        },
+      );
+      const gpu = data?.devices?.[0]?.name;
+      return {
+        available: true,
+        responseTimeMs: Date.now() - started,
+        ...(gpu ? { gpu } : {}),
+      };
+    } catch (error) {
+      return { available: false, error: describeError(error) };
+    }
+  }
+
+  /** Queues a map render and returns ComfyUI's prompt id. */
+  async submit(input: MapWorkflowInput): Promise<string> {
+    const workflow = buildWorkflow(input, this.options);
+    try {
+      const { data } = await this.http.post<{
+        prompt_id?: string;
+        node_errors?: Record<string, unknown>;
+      }>('/prompt', { prompt: workflow, client_id: this.clientId }, { timeout: 10000 });
+      if (!data?.prompt_id) {
+        throw new Error('ComfyUI did not return a prompt id');
+      }
+      return data.prompt_id;
+    } catch (error) {
+      const message = describeError(error);
+      if (/ckpt_name|vae_name|not in \[/.test(message)) {
+        throw new Error(
+          `ComfyUI does not have the model this workflow needs (${this.options.checkpoint} / ${this.options.vae}). Install them, or set COMFYUI_CHECKPOINT / COMFYUI_VAE to names that exist. Details: ${message}`,
+        );
+      }
+      throw new Error(`ComfyUI rejected the job: ${message}`);
+    }
+  }
+
+  async getStatus(
+    promptId: string,
+  ): Promise<{ state: ComfyUIJobState; queuePosition?: number; error?: string }> {
+    const { data: history } = await this.http.get<
+      Record<string, { status?: { status_str?: string; messages?: unknown[] } }>
+    >(`/history/${promptId}`, { timeout: 5000 });
+    const entry = history?.[promptId];
+    if (entry) {
+      if (entry.status?.status_str === 'error') {
+        const failure = (entry.status.messages ?? []).find(
+          (m) => Array.isArray(m) && m[0] === 'execution_error',
+        ) as [string, { exception_message?: string }] | undefined;
+        return {
+          state: 'failed',
+          error: failure?.[1]?.exception_message ?? 'ComfyUI reported an error while rendering',
+        };
+      }
+      return { state: 'complete' };
+    }
+    const { data: queue } = await this.http.get<{
+      queue_running?: unknown[][];
+      queue_pending?: unknown[][];
+    }>('/queue', { timeout: 5000 });
+    if ((queue?.queue_running ?? []).some((q) => q[1] === promptId)) {
+      return { state: 'running' };
+    }
+    const pending = (queue?.queue_pending ?? []).findIndex((q) => q[1] === promptId);
+    if (pending >= 0) {
+      return { state: 'queued', queuePosition: pending + 1 };
+    }
+    return { state: 'unknown' };
+  }
+
+  async getImages(promptId: string): Promise<ComfyUIImageRef[]> {
+    const { data } = await this.http.get<
+      Record<string, { outputs?: Record<string, { images?: Array<Partial<ComfyUIImageRef>> }> }>
+    >(`/history/${promptId}`, { timeout: 5000 });
+    const outputs = data?.[promptId]?.outputs ?? {};
+    const images: ComfyUIImageRef[] = [];
+    for (const node of Object.values(outputs)) {
+      for (const image of node.images ?? []) {
+        if (image.filename) {
+          images.push({
+            filename: image.filename,
+            subfolder: image.subfolder ?? '',
+            type: image.type ?? 'output',
+          });
+        }
+      }
+    }
+    return images;
+  }
+
+  async download(image: ComfyUIImageRef): Promise<Buffer> {
+    const { data } = await this.http.get<ArrayBuffer>('/view', {
+      params: { filename: image.filename, subfolder: image.subfolder, type: image.type },
+      responseType: 'arraybuffer',
+      timeout: 60000,
+    });
+    return Buffer.from(data);
+  }
+
+  /** Removes a queued job, or interrupts it if it is rendering. */
+  async cancel(promptId: string): Promise<boolean> {
+    const status = await this.getStatus(promptId);
+    if (status.state === 'queued') {
+      await this.http.post('/queue', { delete: [promptId] }, { timeout: 5000 });
+      return true;
+    }
+    if (status.state === 'running') {
+      await this.http.post('/interrupt', {}, { timeout: 5000 });
+      return true;
+    }
+    return false;
+  }
+}

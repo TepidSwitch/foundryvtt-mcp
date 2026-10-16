@@ -68,6 +68,9 @@ after editing; closing the window is not enough.
 | `FOUNDRY_ENV_FILE` | auto | Secrets file path |
 | `FOUNDRY_DRY_RUN` | `false` | Log writes but send nothing; tool output carries a DRY RUN banner |
 | `FOUNDRY_TOOLSETS` | all but `script` | Comma-separated toolsets to expose: `actors`, `items`, `effects`, `scenes`, `tokens`, `combat`, `journals`, `compendium`, `audio`, `chat`, `world`, `files`, `generate`, `history`, `diagnostics`, `script`. Unknown names are ignored with a warning |
+| `COMFYUI_URL` | unset | Base URL of a ComfyUI server, e.g. `http://192.168.1.50:8188`. Turns on AI map generation (`foundry_generate_edit`); see [AI map generation](#ai-map-generation-optional) |
+| `COMFYUI_CHECKPOINT` | `dDBattlemapsSDXL10_upscaleV10.safetensors` | SDXL checkpoint file name, as ComfyUI lists it |
+| `COMFYUI_VAE` | `sdxl_vae.safetensors` | VAE file name, as ComfyUI lists it |
 | `FOUNDRY_AUDIT_FILE` | state dir | JSONL write log path, or `off` for memory only. Default: `~/.local/state/foundryvtt-mcp/writes.jsonl` / `%APPDATA%\foundryvtt-mcp\writes.jsonl` |
 
 ## Tools
@@ -90,13 +93,45 @@ hidden, and refused if called, unless `FOUNDRY_WRITE_ENABLED=true`.
 | audio | `foundry_audio`: list | `foundry_audio_edit`: play, stop, create_playlist, add_sound, update, delete, set_scene_music |
 | chat | `foundry_chat`: read, roll | `foundry_chat_edit`: send, request_roll, draw_table |
 | world | `foundry_world`: summary, search, browse, users, refresh | `foundry_world_edit`: create_folder, move_to_folder |
-| generate | `foundry_generate`: npc, loot, rule | |
+| files | `foundry_files`: browse | `foundry_files_edit`: mkdir, upload |
+| generate | `foundry_generate`: npc, loot, map_status, rule | `foundry_generate_edit`: map, cancel_map (needs `COMFYUI_URL`) |
 | history | `foundry_history`: log | `foundry_history_edit`: undo |
 | diagnostics | `foundry_diagnostics`: health, system, search_logs, logs, diagnose | |
 
-That is 12 tools read-only and 23 with writes enabled.
+That is 13 tools read-only and 24 with writes enabled (25 with `COMFYUI_URL` set, which adds `foundry_generate_edit`).
 
 Positions for notes, lights and tokens are grid squares from the top-left of the map image. Roll requests and item cards post dnd5e inline enrichers (`[[/check ...]]`, `[[/save ...]]`, `[[/item ...]]`) that players click in chat; no Foundry module is needed.
+
+## Files
+
+`foundry_files browse` lists Foundry's data folder. `foundry_files_edit upload` sends a
+file from the machine running this server (image, audio, video or PDF, up to 25 MB) to
+`worlds/<world>/mcp-uploads/` unless you give a folder, and returns the path to use for
+a scene background or token. Folders under `modules/` and `systems/` are refused.
+Uploads cannot be undone from here; remove a file with the webdav tools.
+
+## AI map generation (optional)
+
+Nothing here is required. Without `COMFYUI_URL` the map tool is not offered.
+
+ComfyUI is free, open-source software you run yourself; the D&D battlemap SDXL model is a
+free download. The only cost is a machine with a GPU (an SDXL render needs roughly 8 GB of
+VRAM; a 4 GB laptop GPU is too small). No hosted service or account is involved.
+
+On the GPU machine (Windows example):
+
+1. Install [ComfyUI](https://github.com/comfyanonymous/ComfyUI) and the SDXL battlemap
+   checkpoint plus `sdxl_vae.safetensors`. Put them in `models/checkpoints` and `models/vae`.
+2. Start it listening on the network: `python main.py --listen 0.0.0.0` (port 8188).
+3. Allow TCP 8188 in Windows Firewall for the **private** network only.
+4. Set `COMFYUI_URL=http://<that machine's LAN address>:8188` for this server. If your
+   checkpoint file has a different name, set `COMFYUI_CHECKPOINT` (and `COMFYUI_VAE`).
+
+`foundry_diagnostics` action `health` then reports whether ComfyUI is reachable. A map
+request returns a job id immediately; the render runs in the background, and when it
+finishes the image is uploaded and an inactive scene is created. Jobs are kept in memory,
+so a server restart forgets them (the render itself continues in ComfyUI). The workflow
+and prompt wording come from the foundry-vtt-mcp bridge by adambdooley (MIT).
 
 ## Startup behaviour
 

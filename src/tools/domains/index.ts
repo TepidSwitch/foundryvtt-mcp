@@ -11,13 +11,16 @@ import { compendiumTool } from './compendium.js';
 import { diagnosticsTool } from './diagnostics.js';
 import { effectsEditTool } from './effects.js';
 import { filesEditTool, filesTool } from './files.js';
-import { generateTool } from './generate.js';
+import { generateEditTool, generateTool } from './generate.js';
 import { historyEditTool, historyTool } from './history.js';
 import { itemsEditTool, itemsTool } from './items.js';
 import { journalsEditTool, journalsTool } from './journals.js';
 import { scenesEditTool, scenesTool, tokensEditTool } from './scenes.js';
 import { worldTool } from './world.js';
 import { worldEditTool } from './world-edit.js';
+
+/** Tools that only make sense when the optional ComfyUI server is configured. */
+export const COMFYUI_TOOLS: Tool[] = [generateEditTool];
 
 export const ALL_DOMAIN_TOOLS: Tool[] = [
   actorsTool,

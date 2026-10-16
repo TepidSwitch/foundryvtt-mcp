@@ -64,6 +64,13 @@ const ConfigSchema = z.object({
     toolsets: z.string().optional(),
   }),
 
+  // Optional ComfyUI server (map generation). Runs on another machine, e.g. a Windows GPU box.
+  comfyui: z.object({
+    url: z.string().url().optional(),
+    checkpoint: z.string().default('dDBattlemapsSDXL10_upscaleV10.safetensors'),
+    vae: z.string().default('sdxl_vae.safetensors'),
+  }),
+
   cache: z.object({
     enabled: z.boolean().default(true),
     ttlSeconds: z.number().default(300), // 5 minutes
@@ -126,6 +133,12 @@ function loadConfig(): Config {
           : undefined,
       auditFile: process.env.FOUNDRY_AUDIT_FILE,
       toolsets: process.env.FOUNDRY_TOOLSETS,
+    },
+
+    comfyui: {
+      url: process.env.COMFYUI_URL || undefined,
+      checkpoint: process.env.COMFYUI_CHECKPOINT || undefined,
+      vae: process.env.COMFYUI_VAE || undefined,
     },
 
     cache: {

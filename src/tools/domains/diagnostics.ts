@@ -44,7 +44,24 @@ export const diagnosticsTool = new DomainTool({
       description:
         'Combined health report: connection state, world title/system/core version, server health (users, uptime, memory, recent errors). The world section is marked stale when the cache stopped following live changes (a dropped connection) - run foundry_world refresh. Sections needing the REST API module report as unavailable instead of failing. Answers even while disconnected.',
       schema: noArgs,
-      run: (_a, ctx) => handleGetHealthStatus({}, ctx.foundryClient, diagnostics(ctx)),
+      run: async (_a, ctx) => {
+        const result = await handleGetHealthStatus({}, ctx.foundryClient, diagnostics(ctx));
+        if (!ctx.comfyui) {
+          return result;
+        }
+        // ComfyUI is optional: report it only when COMFYUI_URL is set.
+        const comfy = await ctx.comfyui.checkHealth();
+        const line = comfy.available
+          ? `✅ Reachable at ${ctx.comfyui.baseUrl} (${comfy.responseTimeMs} ms)${comfy.gpu ? `, GPU: ${comfy.gpu}` : ''}`
+          : `❌ Not reachable at ${ctx.comfyui.baseUrl}: ${comfy.error}. Start ComfyUI with --listen 0.0.0.0 and allow TCP 8188 in its firewall.`;
+        return {
+          ...result,
+          content: [
+            ...result.content,
+            { type: 'text', text: `\n**ComfyUI (map generation):**\n${line}` },
+          ],
+        };
+      },
     }),
     system: action({
       description: `Server health report: status (healthy/warning/critical), Foundry and system versions, world id, uptime, users and GMs, modules, clients, memory, log buffer and error rate. ${REST_NOTE}`,

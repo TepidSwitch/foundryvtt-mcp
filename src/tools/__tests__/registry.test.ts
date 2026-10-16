@@ -93,7 +93,7 @@ const ACTIONS: Record<string, string[]> = {
   foundry_world_edit: ['create_folder', 'move_to_folder'],
   foundry_files: ['browse'],
   foundry_files_edit: ['mkdir', 'upload'],
-  foundry_generate: ['npc', 'loot', 'rule'],
+  foundry_generate: ['npc', 'loot', 'map_status', 'rule'],
   foundry_history: ['log'],
   foundry_history_edit: ['undo'],
   foundry_diagnostics: ['health', 'system', 'search_logs', 'logs', 'diagnose'],
@@ -170,6 +170,17 @@ describe('registry filtering', () => {
       'foundry_chat',
       'foundry_chat_edit',
     ]);
+  });
+
+  it('offers map generation only when a ComfyUI server is configured', () => {
+    expect(createToolRegistry({ writeEnabled: true }).has('foundry_generate_edit')).toBe(false);
+    const registry = createToolRegistry({ writeEnabled: true, comfyui: true });
+    expect(registry.has('foundry_generate_edit')).toBe(true);
+    const tool = registry.getToolDefinitions().find((t) => t.name === 'foundry_generate_edit');
+    expect(tool?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
+    expect(
+      createToolRegistry({ writeEnabled: false, comfyui: true }).has('foundry_generate_edit'),
+    ).toBe(false);
   });
 
   it('rejects unknown tools', async () => {

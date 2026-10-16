@@ -34,7 +34,10 @@ import { DiagnosticsClient } from './diagnostics/client.js';
 import { FoundryClient, type FoundryClientConfig } from './foundry/client.js';
 import { ConnectionManager, setConnectionStatusProvider } from './foundry/connection-manager.js';
 import { defaultAuditPath } from './foundry/write-audit.js';
+import { ComfyUIClient } from './generate/comfyui.js';
+import { MapJobManager } from './generate/map-jobs.js';
 import type { ToolContext } from './tools/base.js';
+import { defaultUploadDir } from './tools/handlers/files.js';
 import {
   createToolRegistry,
   getAllResources,
@@ -56,6 +59,8 @@ class FoundryMCPServer {
   private diagnosticsClient: DiagnosticsClient;
   private diagnosticSystem: DiagnosticSystem;
   private registry: ToolRegistry;
+  private comfyui?: ComfyUIClient;
+  private maps?: MapJobManager;
 
   /**
    * Creates a new FoundryMCPServer instance.
@@ -112,8 +117,23 @@ class FoundryMCPServer {
     // Initialize DiagnosticSystem
     this.diagnosticSystem = new DiagnosticSystem(this.foundryClient);
 
+    // Optional AI map generation: only when a ComfyUI server is configured.
+    if (config.comfyui.url) {
+      this.comfyui = new ComfyUIClient({
+        baseUrl: config.comfyui.url,
+        checkpoint: config.comfyui.checkpoint,
+        vae: config.comfyui.vae,
+      });
+      this.maps = new MapJobManager({
+        comfy: this.comfyui,
+        foundry: this.foundryClient,
+        uploadDir: () => defaultUploadDir(this.foundryClient),
+      });
+    }
+
     // Tools exposed depend on FOUNDRY_WRITE_ENABLED and FOUNDRY_TOOLSETS.
     this.registry = createToolRegistry({
+      comfyui: Boolean(this.comfyui),
       writeEnabled: config.foundry.writeEnabled,
       toolsets: parseToolsets(config.foundry.toolsets, (name) =>
         logger.warn(`Ignoring unknown toolset '${name}' in FOUNDRY_TOOLSETS`),
@@ -160,6 +180,8 @@ class FoundryMCPServer {
           foundryClient: this.foundryClient,
           diagnosticsClient: this.diagnosticsClient,
           diagnosticSystem: this.diagnosticSystem,
+          comfyui: this.comfyui,
+          maps: this.maps,
         };
         const route = () =>
           this.registry.execute(name, args || {}, context) as Promise<CallToolResult>;
@@ -257,6 +279,7 @@ class FoundryMCPServer {
    */
   async shutdown(): Promise<void> {
     try {
+      this.maps?.dispose();
       await this.foundryClient.disconnect();
       logger.info('FoundryVTT MCP Server shutdown completed');
     } catch (error) {
