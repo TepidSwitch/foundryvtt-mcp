@@ -8,6 +8,7 @@ import { handleUpdateActorAttribute } from '../handlers/actor-mutations.js';
 import { handleGetActorDetails, handleSearchActors } from '../handlers/actors.js';
 import { handleGetActorItems, handleGetPartyOverview } from '../handlers/character.js';
 import { handleImportFromCompendium } from '../handlers/import-place.js';
+import { handleSetActorOwnership } from '../handlers/ownership.js';
 import { handleCompareParty, handleFindInParty } from '../handlers/party.js';
 
 const scope = z
@@ -116,6 +117,16 @@ export const actorsEditTool = new DomainTool({
           ),
       }),
       run: (a, ctx) => handleUpdateActorAttribute(a, ctx.foundryClient),
+    }),
+    set_ownership: action({
+      description:
+        'Set what one user (or everyone else) may do with an actor: none, limited (sees the token), observer (sees the sheet) or owner (full control; lets a player edit and use it). user is a user id or name (see foundry_world users), or "default" for everyone else.',
+      schema: z.object({
+        actor: z.string().describe("Actor id, name or a player's name"),
+        user: z.string().describe('User id or name, or "default"'),
+        level: z.enum(['none', 'limited', 'observer', 'owner']).describe('Ownership level'),
+      }),
+      run: (a, ctx) => handleSetActorOwnership(a, ctx.foundryClient),
     }),
     import: action({
       description:

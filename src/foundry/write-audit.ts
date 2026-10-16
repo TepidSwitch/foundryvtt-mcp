@@ -154,8 +154,16 @@ export function planUndo(
       }
       const prev = key.includes('.') ? getPath(before, key) : before[key];
       if (prev === undefined) {
-        // The update added this key; removing it restores the earlier state.
-        restore[key] = { ...FORCED_DELETION };
+        if (key.startsWith('ownership.')) {
+          // Foundry validates every ownership value as a permission level, so the
+          // deletion operator is rejected there. An entry equal to the default
+          // level grants the same access as having no entry.
+          const fallback = getPath(before, 'ownership.default');
+          restore[key] = typeof fallback === 'number' ? fallback : 0;
+        } else {
+          // The update added this key; removing it restores the earlier state.
+          restore[key] = { ...FORCED_DELETION };
+        }
       } else {
         restore[key] = structuredClone(prev);
       }

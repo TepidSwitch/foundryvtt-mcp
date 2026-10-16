@@ -178,6 +178,21 @@ describe('planUndo', () => {
       updates: [{ _id: ACTOR, 'flags.x.new': { __$OPERATOR$__: 'ForcedDeletion' } }],
     });
   });
+  it('restores an ownership entry the update added to the default level, not a deletion', () => {
+    const upd = planUndo({
+      id: 'w4',
+      at: '',
+      type: 'Actor',
+      action: 'update',
+      ids: [ACTOR],
+      names: [],
+      updates: [{ _id: ACTOR, 'ownership.USERAAAAAAAAAAAA': 3 }],
+      before: [{ _id: ACTOR, ownership: { default: 1 } }],
+    });
+    expect(upd.ok && upd.op.operation).toMatchObject({
+      updates: [{ _id: ACTOR, 'ownership.USERAAAAAAAAAAAA': 1 }],
+    });
+  });
   it('refuses when state was not captured', () => {
     const r = planUndo({
       id: 'w3',
