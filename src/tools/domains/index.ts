@@ -5,7 +5,7 @@
 import type { Tool } from '../base.js';
 import { actorsEditTool, actorsTool } from './actors.js';
 import { audioEditTool, audioTool } from './audio.js';
-import { chatTool } from './chat.js';
+import { chatEditTool, chatTool } from './chat.js';
 import { combatEditTool, combatTool } from './combat.js';
 import { compendiumTool } from './compendium.js';
 import { diagnosticsTool } from './diagnostics.js';
@@ -35,6 +35,7 @@ export const ALL_DOMAIN_TOOLS: Tool[] = [
   audioTool,
   audioEditTool,
   chatTool,
+  chatEditTool,
   worldTool,
   worldEditTool,
   generateTool,

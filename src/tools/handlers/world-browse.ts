@@ -153,7 +153,7 @@ function describeJournal(doc: Rec): string {
 }
 
 /** A roll-table row as plain text (rows are often HTML with enrichers). */
-function rowText(r: Rec): string {
+export function rowText(r: Rec): string {
   return truncate(
     htmlToText(str(r.name) || str(r.description) || str(r.text)).replace(/\n+/g, ' '),
     400,
@@ -255,7 +255,7 @@ export async function handleGetCompendiumDocument(
 // get_roll_table
 // ---------------------------------------------------------------------------
 
-function rollFormula(formula: string): { total: number; detail: string } | null {
+export function rollFormula(formula: string): { total: number; detail: string } | null {
   const m = formula.replace(/\s+/g, '').match(/^(\d*)d(\d+)([+-]\d+)?$/i);
   if (!m) {
     return null;

@@ -29,6 +29,7 @@ const EXPECTED_SURFACE: Array<[string, boolean, boolean]> = [
   ['foundry_audio', true, false],
   ['foundry_audio_edit', false, true],
   ['foundry_chat', true, false],
+  ['foundry_chat_edit', false, false],
   ['foundry_world', true, false],
   ['foundry_world_edit', false, true],
   ['foundry_generate', true, false],
@@ -45,6 +46,7 @@ const ACTIONS: Record<string, string[]> = {
     'create',
     'update',
     'delete',
+    'use',
     'add_to_actor',
     'update_on_actor',
     'remove_from_actor',
@@ -84,6 +86,7 @@ const ACTIONS: Record<string, string[]> = {
     'set_scene_music',
   ],
   foundry_chat: ['read', 'roll'],
+  foundry_chat_edit: ['send', 'request_roll', 'draw_table'],
   foundry_world: ['summary', 'search', 'browse', 'users', 'refresh'],
   foundry_world_edit: ['create_folder', 'move_to_folder'],
   foundry_generate: ['npc', 'loot', 'rule'],
@@ -161,6 +164,7 @@ describe('registry filtering', () => {
       'foundry_combat',
       'foundry_combat_edit',
       'foundry_chat',
+      'foundry_chat_edit',
     ]);
   });
 

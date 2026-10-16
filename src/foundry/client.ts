@@ -231,6 +231,8 @@ export class FoundryClient {
   private dryRunWrites = 0;
   private currentUndoOf: string | null = null;
   private currentBatchId: string | null = null;
+  /** Id of the user this session is logged in as (from the `session` event). */
+  private sessionUserId: string | null = null;
   /**
    * Last observed outcome of a REST request: false once one failed to reach
    * FoundryVTT at all (#217). Unused in Socket.IO mode.
@@ -364,6 +366,7 @@ export class FoundryClient {
           return reject(new Error('Authentication failed — session event returned no userId'));
         }
 
+        this.sessionUserId = data.userId;
         this.socket?.emit('world', (worldData: WorldData) => {
           clearTimeout(timeout);
           cleanup();
@@ -580,6 +583,11 @@ export class FoundryClient {
    */
   isWorldDataStale(): boolean {
     return this.worldDataStale;
+  }
+
+  /** Id of the user this server is logged in as, or null before the first login. */
+  getUserId(): string | null {
+    return this.sessionUserId;
   }
 
   /** Number of writes intercepted by dry-run mode so far. */

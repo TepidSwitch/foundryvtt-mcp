@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import type { ActorItemCreateSource } from '../../foundry/types.js';
 import { action, DomainTool } from '../domain.js';
+import { handleUseItem } from '../handlers/chat-edits.js';
 import {
   handleCreateActorItem,
   handleDeleteActorItem,
@@ -77,6 +78,21 @@ export const itemsEditTool = new DomainTool({
         'Delete a world item (id or name). Confirm with the user first; foundry_history_edit undo can re-create it. Copies on actors are separate and untouched.',
       schema: z.object({ item: z.string().describe('World item id or name') }),
       run: (a, ctx) => handleDeleteWorldItem(a, ctx.foundryClient),
+    }),
+    use: action({
+      description:
+        'Post a card for an item an actor owns, with a link its owner clicks to use it (attack, damage, save, ...) in chat. activity picks one activity by name. Nothing is rolled or spent here.',
+      schema: z.object({
+        actor: z.string().describe("Actor id, name or a player's name"),
+        item: z.string().describe('Item id or name on that actor'),
+        activity: z.string().optional().describe('Name of one activity of the item'),
+        prompt: z.string().optional().describe('Sentence shown above the card'),
+        whisper: z
+          .array(z.string())
+          .optional()
+          .describe('Whisper to these users; omit for everyone'),
+      }),
+      run: (a, ctx) => handleUseItem(a, ctx.foundryClient),
     }),
     add_to_actor: action({
       description:
