@@ -40,7 +40,7 @@ const ACTIONS: Record<string, string[]> = {
   foundry_actors_edit: ['update', 'set_ownership', 'import'],
   foundry_items: ['search'],
   foundry_items_edit: ['add_to_actor', 'update_on_actor', 'remove_from_actor'],
-  foundry_effects_edit: ['apply_status'],
+  foundry_effects_edit: ['list', 'create', 'update', 'delete', 'remove_status', 'apply_status'],
   foundry_scenes: ['search', 'get', 'suggest', 'image'],
   foundry_tokens_edit: ['place', 'move'],
   foundry_combat: ['state'],

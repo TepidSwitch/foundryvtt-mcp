@@ -245,6 +245,15 @@ function resolveParent(
     return { parentType: 'ActorDelta', parent: token.delta as Record<string, unknown> };
   }
 
+  // An item owned by an actor: Actor.<aid>.Item.<iid> (parent of that item's effects).
+  if (segments.length === 4 && segments[0] === 'Actor' && segments[2] === 'Item') {
+    const actor = worldData.actors.find((ac) => ac._id === segments[1]);
+    const item = (
+      actor as unknown as { items?: Array<Record<string, unknown>> } | undefined
+    )?.items?.find((i) => i._id === segments[3]);
+    return item ? { parentType: 'Item', parent: item } : null;
+  }
+
   if (segments.length !== 2) {
     return null;
   }
