@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { FoundryClient } from '../../../foundry/client.js';
 import { handleCanvasList } from '../canvas.js';
+import { handleAddDrawing, handleRemoveDrawing, handleUpdateDrawing } from '../canvas-drawings.js';
 import { handleAddRegion, handleRemoveRegion, handleUpdateRegion } from '../canvas-regions.js';
 import { handleAddTile, handleRemoveTile, handleUpdateTile } from '../canvas-tiles.js';
 import {
@@ -319,7 +320,7 @@ describe('regions', () => {
   });
 });
 
-describe('tiles', () => {
+describe('tiles and drawings', () => {
   it('adds and moves a tile in whole pixels', async () => {
     const { mock, createDocuments, updateDocuments } = client();
     await handleAddTile(
@@ -369,5 +370,87 @@ describe('tiles', () => {
       'tree.png at (1, 1) 2×1 sq',
     );
     await handleRemoveTile({ scene: 'Inn', tile: 'TILEAAAAAAAAAAAA' }, mock);
+  });
+
+  it('draws shapes with single-letter v14 types and relative polygon points', async () => {
+    const { mock, createDocuments, updateDocuments, deleteDocuments } = client();
+    await handleAddDrawing(
+      {
+        scene: 'Inn',
+        shape: 'ellipse',
+        x: 1,
+        y: 1,
+        width: 2,
+        height: 1,
+        fill: 'solid',
+        fill_color: '#00ff00',
+      },
+      mock,
+    );
+    expect(createDocuments).toHaveBeenLastCalledWith(
+      'Drawing',
+      [
+        {
+          shape: { type: 'e', width: 200, height: 100 },
+          x: 600,
+          y: 500,
+          fillType: 1,
+          fillColor: '#00ff00',
+          author: 'USERGMAAAAAAAAAA',
+        },
+      ],
+      `Scene.${SCENE}`,
+    );
+    await handleAddDrawing(
+      { scene: 'Inn', shape: 'polygon', x: 1, y: 1, points: [1, 1, 3, 1, 2, 3] },
+      mock,
+    );
+    expect(
+      (createDocuments.mock.calls.at(-1)?.[1] as Array<Record<string, unknown>>)[0]?.shape,
+    ).toEqual({
+      type: 'p',
+      width: 200,
+      height: 200,
+      points: [0, 0, 200, 0, 100, 200],
+    });
+    await handleAddDrawing(
+      {
+        scene: 'Inn',
+        shape: 'text',
+        x: 0,
+        y: 0,
+        width: 4,
+        height: 1,
+        text: 'Cellar',
+        font_size: 40,
+      },
+      mock,
+    );
+    expect(
+      (createDocuments.mock.calls.at(-1)?.[1] as Array<Record<string, unknown>>)[0],
+    ).toMatchObject({
+      shape: { type: 'r', width: 400, height: 100 },
+      fillType: 0,
+      strokeWidth: 0,
+      text: 'Cellar',
+      fontSize: 40,
+    });
+    await expect(
+      handleAddDrawing({ scene: 'Inn', shape: 'text', x: 0, y: 0, width: 1, height: 1 }, mock),
+    ).rejects.toThrow(/needs text/);
+    await handleUpdateDrawing(
+      { scene: 'Inn', drawing: 'DRAWAAAAAAAAAAAA', hidden: true, stroke_color: '#fff' },
+      mock,
+    );
+    expect(updateDocuments).toHaveBeenCalledWith(
+      'Drawing',
+      [{ _id: 'DRAWAAAAAAAAAAAA', strokeColor: '#fff', hidden: true }],
+      `Scene.${SCENE}`,
+    );
+    await handleRemoveDrawing({ scene: 'Inn', drawing: 'DRAWAAAAAAAAAAAA' }, mock);
+    expect(deleteDocuments).toHaveBeenCalledWith('Drawing', ['DRAWAAAAAAAAAAAA'], `Scene.${SCENE}`);
+    expect(text(await handleCanvasList({ scene: 'Inn', kind: 'drawings' }, mock))).toContain(
+      'rectangle at (0, 0) "Hatch"',
+    );
   });
 });

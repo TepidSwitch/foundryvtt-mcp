@@ -9,6 +9,11 @@ import { z } from 'zod';
 import { action, DomainTool } from '../domain.js';
 import { handleCanvasList } from '../handlers/canvas.js';
 import {
+  handleAddDrawing,
+  handleRemoveDrawing,
+  handleUpdateDrawing,
+} from '../handlers/canvas-drawings.js';
+import {
   handleAddRegion,
   handleRemoveRegion,
   handleUpdateRegion,
@@ -97,6 +102,21 @@ const tileFields = {
   sort: z.number().int().optional().describe('Stacking order; higher draws on top'),
 };
 
+const drawingStyle = {
+  fill: z.enum(['none', 'solid']).optional().describe('Fill type'),
+  fill_color: z.string().optional().describe('Fill colour, e.g. "#cc28a8"'),
+  fill_alpha: z.number().min(0).max(1).optional().describe('Fill opacity 0-1'),
+  stroke_width: z.number().int().min(0).optional().describe('Outline width in pixels'),
+  stroke_color: z.string().optional().describe('Outline colour'),
+  stroke_alpha: z.number().min(0).max(1).optional().describe('Outline opacity 0-1'),
+  text: z.string().optional().describe('Text label'),
+  font_size: z.number().int().min(8).max(256).optional().describe('Label size'),
+  text_color: z.string().optional().describe('Label colour'),
+  hidden: z.boolean().optional().describe('Hide from players'),
+  locked: z.boolean().optional().describe('Lock against editing'),
+  elevation: z.number().optional().describe('Elevation'),
+};
+
 export const canvasTool = new DomainTool({
   name: 'foundry_canvas',
   title: 'Foundry canvas',
@@ -110,7 +130,7 @@ export const canvasTool = new DomainTool({
         'List one kind of canvas object on a scene. For walls, filter by door/wall/window/terrain/invisible/ethereal/"secret door" or give x, y, width, height (squares) to see only walls with an end inside that area. Scenes can hold hundreds of walls, so narrow before raising limit.',
       schema: z.object({
         scene,
-        kind: z.enum(['walls', 'regions', 'tiles']).describe('What to list'),
+        kind: z.enum(['walls', 'regions', 'tiles', 'drawings']).describe('What to list'),
         filter: z
           .enum([
             'all',
@@ -274,6 +294,49 @@ export const canvasEditTool = new DomainTool({
       description: 'Remove a tile. foundry_history_edit undo puts it back.',
       schema: z.object({ scene, tile: z.string().describe('Tile id') }),
       run: (a, ctx) => handleRemoveTile(a, ctx.foundryClient),
+    }),
+    add_drawing: action({
+      description:
+        'Draw a rectangle, ellipse, polygon or text label. For text give shape "text", x, y, width, height (the box) and text. For a polygon give points; x,y is where it is anchored.',
+      schema: z.object({
+        scene,
+        shape: z.enum(['rectangle', 'ellipse', 'polygon', 'text']).describe('What to draw'),
+        x: col('Left edge or anchor'),
+        y: row('Top edge or anchor'),
+        width: z
+          .number()
+          .positive()
+          .optional()
+          .describe('Width in squares (rectangle, ellipse, text)'),
+        height: z
+          .number()
+          .positive()
+          .optional()
+          .describe('Height in squares (rectangle, ellipse, text)'),
+        points: z
+          .array(z.number())
+          .optional()
+          .describe('Polygon corners [x1, y1, x2, y2, ...] in squares'),
+        ...drawingStyle,
+      }),
+      run: (a, ctx) => handleAddDrawing(a, ctx.foundryClient),
+    }),
+    update_drawing: action({
+      description:
+        'Change a drawing: position (give both x and y), colours, text, hidden, locked, elevation.',
+      schema: z.object({
+        scene,
+        drawing: z.string().describe('Drawing id'),
+        x: col('New left edge').optional(),
+        y: row('New top edge').optional(),
+        ...drawingStyle,
+      }),
+      run: (a, ctx) => handleUpdateDrawing(a, ctx.foundryClient),
+    }),
+    remove_drawing: action({
+      description: 'Remove a drawing. foundry_history_edit undo puts it back.',
+      schema: z.object({ scene, drawing: z.string().describe('Drawing id') }),
+      run: (a, ctx) => handleRemoveDrawing(a, ctx.foundryClient),
     }),
   },
 });
