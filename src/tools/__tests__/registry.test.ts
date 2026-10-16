@@ -32,6 +32,8 @@ const EXPECTED_SURFACE: Array<[string, boolean, boolean]> = [
   ['foundry_chat_edit', false, false],
   ['foundry_world', true, false],
   ['foundry_world_edit', false, true],
+  ['foundry_files', true, false],
+  ['foundry_files_edit', false, false],
   ['foundry_generate', true, false],
   ['foundry_history', true, false],
   ['foundry_history_edit', false, true],
@@ -89,6 +91,8 @@ const ACTIONS: Record<string, string[]> = {
   foundry_chat_edit: ['send', 'request_roll', 'draw_table'],
   foundry_world: ['summary', 'search', 'browse', 'users', 'refresh'],
   foundry_world_edit: ['create_folder', 'move_to_folder'],
+  foundry_files: ['browse'],
+  foundry_files_edit: ['mkdir', 'upload'],
   foundry_generate: ['npc', 'loot', 'rule'],
   foundry_history: ['log'],
   foundry_history_edit: ['undo'],
@@ -146,7 +150,7 @@ describe('tool surface', () => {
 describe('registry filtering', () => {
   it('hides write tools unless writes are enabled', () => {
     const names = createToolRegistry({ writeEnabled: false }).getToolNames();
-    expect(names).toHaveLength(12);
+    expect(names).toHaveLength(13);
     expect(names.some((n) => n.endsWith('_edit'))).toBe(false);
   });
 

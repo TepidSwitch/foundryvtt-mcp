@@ -6,11 +6,20 @@
  */
 
 import axios, { type AxiosInstance, type AxiosRequestConfig, type AxiosResponse } from 'axios';
+import FormData from 'form-data';
 import { io, type Socket } from 'socket.io-client';
 import { z } from 'zod';
 import { logger } from '../utils/logger.js';
 import { authenticateFoundry, sessionSocketOptions } from './auth.js';
 import { evaluateDiceFormula } from './dice-formula.js';
+import {
+  assertWritableDataPath,
+  contentTypeFor,
+  folderChain,
+  MAX_UPLOAD_BYTES,
+  normalizeDataPath,
+  sanitizeFilename,
+} from './files.js';
 import { buildTokenData, cleanForImport } from './import.js';
 import type {
   ActorAttributeUpdateResult,
@@ -231,6 +240,8 @@ export class FoundryClient {
   private dryRunWrites = 0;
   private currentUndoOf: string | null = null;
   private currentBatchId: string | null = null;
+  /** Session cookie value from the last login (for the HTTP upload endpoint). */
+  private sessionCookie: string | null = null;
   /** Id of the user this session is logged in as (from the `session` event). */
   private sessionUserId: string | null = null;
   /**
@@ -324,6 +335,7 @@ export class FoundryClient {
     }
 
     const { session } = await authenticateFoundry(this.config.baseUrl, user, this.config.password);
+    this.sessionCookie = session;
 
     // Connect authenticated socket and load world data
     this.worldData = await this.connectAndLoadWorld(session);
@@ -588,6 +600,12 @@ export class FoundryClient {
   /** Id of the user this server is logged in as, or null before the first login. */
   getUserId(): string | null {
     return this.sessionUserId;
+  }
+
+  /** Id of the loaded world (the folder name under worlds/), or null before the first load. */
+  getWorldId(): string | null {
+    const id = (this.worldData?.world as Record<string, unknown> | undefined)?.id;
+    return typeof id === 'string' ? id : null;
   }
 
   /** Number of writes intercepted by dry-run mode so far. */
@@ -1830,6 +1848,147 @@ export class FoundryClient {
       ...(parentUuid ? { parentUuid } : {}),
     });
     return result as string[];
+  }
+
+  // ==========================================================================
+  // Files (Foundry data folder)
+  // ==========================================================================
+
+  /** `manageFiles` takes (data, options, ack) - three arguments, unlike document events. */
+  private manageFiles<T>(data: Record<string, unknown>, options: Record<string, unknown> = {}) {
+    return new Promise<T>((resolve, reject) => {
+      const socket = this.socket;
+      if (!socket?.connected) {
+        reject(new Error('Socket.IO is not connected'));
+        return;
+      }
+      const timeoutMs = this.config.timeout || 10000;
+      const timeout = setTimeout(
+        () => reject(new Error(`Timeout waiting for 'manageFiles' response (${timeoutMs}ms)`)),
+        timeoutMs,
+      );
+      socket.emit('manageFiles', data, options, (result: T & { error?: string }) => {
+        clearTimeout(timeout);
+        if (result?.error) {
+          reject(new Error(String(result.error)));
+        } else {
+          resolve(result);
+        }
+      });
+    });
+  }
+
+  /**
+   * Lists a folder of the Foundry data directory. Reading needs no write
+   * permission. `target` is relative to the data folder; "" is its root.
+   */
+  async browseFiles(
+    target: string,
+    options: { extensions?: string[] } = {},
+  ): Promise<{ target: string; dirs: string[]; files: string[] }> {
+    const path = normalizeDataPath(target, { allowRoot: true });
+    const result = await this.manageFiles<{ target?: string; dirs?: string[]; files?: string[] }>(
+      { action: 'browseFiles', storage: 'data', target: path },
+      options.extensions ? { extensions: options.extensions } : {},
+    );
+    return {
+      target: result.target ?? path,
+      dirs: Array.isArray(result.dirs) ? result.dirs : [],
+      files: Array.isArray(result.files) ? result.files : [],
+    };
+  }
+
+  /**
+   * Creates a folder and any missing parents. Returns the folders actually
+   * created (empty when it already existed).
+   */
+  async ensureDirectory(target: string): Promise<string[]> {
+    this.assertWriteable();
+    const path = normalizeDataPath(target);
+    assertWritableDataPath(path);
+    if (this.config.dryRun) {
+      this.dryRunWrites += 1;
+      return [path];
+    }
+    const created: string[] = [];
+    for (const dir of folderChain(path)) {
+      try {
+        await this.manageFiles({ action: 'createDirectory', storage: 'data', target: dir });
+        created.push(dir);
+      } catch (error) {
+        // An existing folder is fine; anything else is a real failure.
+        if (!/exist/i.test(error instanceof Error ? error.message : String(error))) {
+          throw error;
+        }
+      }
+    }
+    return created;
+  }
+
+  /**
+   * Uploads a file into the Foundry data folder (multipart POST /upload with the
+   * session cookie). The folder is created if missing. Only media types are
+   * accepted. Returns the stored path to use in documents.
+   */
+  async uploadFile(buffer: Buffer, filename: string, targetDir: string): Promise<string> {
+    this.assertWriteable();
+    const dir = normalizeDataPath(targetDir);
+    assertWritableDataPath(dir);
+    const name = sanitizeFilename(filename);
+    const contentType = contentTypeFor(name);
+    if (!contentType) {
+      throw new Error(
+        `Cannot upload "${name}": only images, audio, video and PDF files are allowed`,
+      );
+    }
+    if (buffer.length === 0) {
+      throw new Error(`Cannot upload "${name}": the file is empty`);
+    }
+    if (buffer.length > MAX_UPLOAD_BYTES) {
+      throw new Error(
+        `Cannot upload "${name}": ${(buffer.length / 1048576).toFixed(1)} MB is over the ${MAX_UPLOAD_BYTES / 1048576} MB limit`,
+      );
+    }
+    if (this.config.dryRun) {
+      this.dryRunWrites += 1;
+      return `${dir}/${name}`;
+    }
+    if (!this.sessionCookie) {
+      throw new Error('Not logged in to Foundry yet - try again in a moment');
+    }
+    await this.ensureDirectory(dir);
+
+    const form = new FormData();
+    form.append('source', 'data');
+    form.append('target', dir);
+    form.append('upload', buffer, { filename: name, contentType });
+    const response = await axios.post<{ path?: string; error?: string; message?: string }>(
+      `${this.config.baseUrl.replace(/\/$/, '')}/upload`,
+      form,
+      {
+        headers: {
+          ...form.getHeaders(),
+          Cookie: `session=${this.sessionCookie}`,
+          Origin: new URL(this.config.baseUrl).origin,
+        },
+        maxBodyLength: MAX_UPLOAD_BYTES * 2,
+        timeout: Math.max(this.config.timeout || 10000, 60000),
+        validateStatus: () => true,
+      },
+    );
+    if (response.status === 413) {
+      throw new Error(`Foundry refused "${name}": the file is too large for the server`);
+    }
+    if (response.data?.error) {
+      throw new Error(`Foundry refused the upload: ${response.data.error}`);
+    }
+    if (response.status >= 400 || !response.data?.path) {
+      throw new Error(
+        `Upload of "${name}" failed (HTTP ${response.status}); the server did not return a path`,
+      );
+    }
+    logger.info('Uploaded file to Foundry', { path: response.data.path, bytes: buffer.length });
+    return response.data.path;
   }
 
   // ==========================================================================

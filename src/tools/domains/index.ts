@@ -10,6 +10,7 @@ import { combatEditTool, combatTool } from './combat.js';
 import { compendiumTool } from './compendium.js';
 import { diagnosticsTool } from './diagnostics.js';
 import { effectsEditTool } from './effects.js';
+import { filesEditTool, filesTool } from './files.js';
 import { generateTool } from './generate.js';
 import { historyEditTool, historyTool } from './history.js';
 import { itemsEditTool, itemsTool } from './items.js';
@@ -38,6 +39,8 @@ export const ALL_DOMAIN_TOOLS: Tool[] = [
   chatEditTool,
   worldTool,
   worldEditTool,
+  filesTool,
+  filesEditTool,
   generateTool,
   historyTool,
   historyEditTool,
