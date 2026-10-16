@@ -79,21 +79,24 @@ hidden, and refused if called, unless `FOUNDRY_WRITE_ENABLED=true`.
 
 | Toolset | Read tool (actions) | Write tool (actions) |
 | --- | --- | --- |
-| actors | `foundry_actors`: search, get, items, party, find_in_party, compare | `foundry_actors_edit`: update, import |
-| items | `foundry_items`: search | `foundry_items_edit`: add_to_actor, update_on_actor, remove_from_actor |
-| effects | | `foundry_effects_edit`: apply_status |
-| scenes | `foundry_scenes`: search, get, suggest, image | |
-| tokens | | `foundry_tokens_edit`: place, move |
+| actors | `foundry_actors`: search, get, items, party, find_in_party, compare | `foundry_actors_edit`: update, set_ownership, import |
+| items | `foundry_items`: search | `foundry_items_edit`: create, update, delete (world items); use (post an item card); add_to_actor, update_on_actor, remove_from_actor |
+| effects | | `foundry_effects_edit`: list, create, update, delete (actors and items); apply_status, remove_status |
+| scenes | `foundry_scenes`: search, get, suggest, image | `foundry_scenes_edit`: activate, update, add_note, remove_note, add_light, remove_light |
+| tokens | | `foundry_tokens_edit`: place, update, delete, move |
 | combat | `foundry_combat`: state | `foundry_combat_edit`: start, next_turn, set_initiative, end |
-| journals | `foundry_journals`: search, get | `foundry_journals_edit`: create, write_session_notes |
+| journals | `foundry_journals`: search, get | `foundry_journals_edit`: create, add_page, append, replace_page, rename, delete, write_session_notes |
 | compendium | `foundry_compendium`: search, get, packs, roll_table | |
-| chat | `foundry_chat`: read, roll | |
-| world | `foundry_world`: summary, search, browse, users, refresh | |
+| audio | `foundry_audio`: list | `foundry_audio_edit`: play, stop, create_playlist, add_sound, update, delete, set_scene_music |
+| chat | `foundry_chat`: read, roll | `foundry_chat_edit`: send, request_roll, draw_table |
+| world | `foundry_world`: summary, search, browse, users, refresh | `foundry_world_edit`: create_folder, move_to_folder |
 | generate | `foundry_generate`: npc, loot, rule | |
 | history | `foundry_history`: log | `foundry_history_edit`: undo |
 | diagnostics | `foundry_diagnostics`: health, system, search_logs, logs, diagnose | |
 
-That is 11 tools read-only and 18 with writes enabled.
+That is 12 tools read-only and 23 with writes enabled.
+
+Positions for notes, lights and tokens are grid squares from the top-left of the map image. Roll requests and item cards post dnd5e inline enrichers (`[[/check ...]]`, `[[/save ...]]`, `[[/item ...]]`) that players click in chat; no Foundry module is needed.
 
 ## Startup behaviour
 
