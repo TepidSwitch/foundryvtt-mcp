@@ -25,6 +25,8 @@ const EXPECTED_SURFACE: Array<[string, boolean, boolean]> = [
   ['foundry_journals', true, false],
   ['foundry_journals_edit', false, false],
   ['foundry_compendium', true, false],
+  ['foundry_audio', true, false],
+  ['foundry_audio_edit', false, true],
   ['foundry_chat', true, false],
   ['foundry_world', true, false],
   ['foundry_generate', true, false],
@@ -46,6 +48,16 @@ const ACTIONS: Record<string, string[]> = {
   foundry_journals: ['search', 'get'],
   foundry_journals_edit: ['create', 'write_session_notes'],
   foundry_compendium: ['search', 'get', 'packs', 'roll_table'],
+  foundry_audio: ['list'],
+  foundry_audio_edit: [
+    'play',
+    'stop',
+    'create_playlist',
+    'add_sound',
+    'update',
+    'delete',
+    'set_scene_music',
+  ],
   foundry_chat: ['read', 'roll'],
   foundry_world: ['summary', 'search', 'browse', 'users', 'refresh'],
   foundry_generate: ['npc', 'loot', 'rule'],
@@ -105,7 +117,7 @@ describe('tool surface', () => {
 describe('registry filtering', () => {
   it('hides write tools unless writes are enabled', () => {
     const names = createToolRegistry({ writeEnabled: false }).getToolNames();
-    expect(names).toHaveLength(11);
+    expect(names).toHaveLength(12);
     expect(names.some((n) => n.endsWith('_edit'))).toBe(false);
   });
 

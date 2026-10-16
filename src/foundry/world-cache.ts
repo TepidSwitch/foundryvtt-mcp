@@ -56,6 +56,8 @@ const EMBEDDED_COLLECTIONS: Record<string, Record<string, string>> = {
   Actor: { Item: 'items', ActiveEffect: 'effects' },
   Scene: { Token: 'tokens', AmbientLight: 'lights', Wall: 'walls', Drawing: 'drawings' },
   Combat: { Combatant: 'combatants' },
+  Playlist: { PlaylistSound: 'sounds' },
+  JournalEntry: { JournalEntryPage: 'pages' },
   Item: { ActiveEffect: 'effects' },
   // An unlinked token's synthetic actor: its data lives on `token.delta`.
   ActorDelta: { Item: 'items', ActiveEffect: 'effects' },

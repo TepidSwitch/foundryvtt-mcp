@@ -29,10 +29,11 @@ const FOLDER_TYPES: Record<string, string> = {
   Scene: 'Scene',
   JournalEntry: 'JournalEntry',
   RollTable: 'RollTable',
+  Playlist: 'Playlist',
 };
 
 /** Finds a world folder of the given document type by id or exact name. */
-function resolveFolder(snapshot: WorldData, ref: string, packType: string): string {
+export function resolveFolder(snapshot: WorldData, ref: string, packType: string): string {
   const type = FOLDER_TYPES[packType];
   const candidates = snapshot.folders.filter((f) => str(f.type) === type);
   const byId = candidates.find((f) => f._id === ref);
