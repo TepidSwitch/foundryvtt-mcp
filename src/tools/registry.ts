@@ -17,8 +17,13 @@ import {
   type Toolset,
 } from './base.js';
 
-/** Toolsets enabled when `FOUNDRY_TOOLSETS` is not set: everything except `script`. */
-export const DEFAULT_TOOLSETS: readonly Toolset[] = TOOLSETS.filter((t) => t !== 'script');
+/**
+ * Toolsets enabled when `FOUNDRY_TOOLSETS` is not set: everything except `canvas`
+ * (low-level wall, region, tile and drawing editing) and `script`.
+ */
+export const DEFAULT_TOOLSETS: readonly Toolset[] = TOOLSETS.filter(
+  (t) => t !== 'script' && t !== 'canvas',
+);
 
 export interface RegistryOptions {
   /** Expose tools that can mutate the world. */

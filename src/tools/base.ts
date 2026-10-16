@@ -70,6 +70,7 @@ export const TOOLSETS = [
   'generate',
   'history',
   'diagnostics',
+  'canvas',
   'script',
 ] as const;
 

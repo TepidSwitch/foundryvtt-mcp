@@ -87,6 +87,8 @@ const ACTIONS: Record<string, string[]> = {
     'delete',
     'set_scene_music',
   ],
+  foundry_canvas: ['list'],
+  foundry_canvas_edit: ['add_walls', 'add_room', 'set_door', 'remove_walls'],
   foundry_chat: ['read', 'roll'],
   foundry_chat_edit: ['send', 'request_roll', 'draw_table'],
   foundry_world: ['summary', 'search', 'browse', 'users', 'refresh'],
@@ -170,6 +172,18 @@ describe('registry filtering', () => {
       'foundry_chat',
       'foundry_chat_edit',
     ]);
+  });
+
+  it('keeps the low-level canvas tools off unless the canvas toolset is named', () => {
+    expect(createToolRegistry({ writeEnabled: true }).getToolNames().join()).not.toContain(
+      'canvas',
+    );
+    expect(DEFAULT_TOOLSETS).not.toContain('canvas');
+    const registry = createToolRegistry({ writeEnabled: true, toolsets: ['canvas'] });
+    expect(registry.getToolNames()).toEqual(['foundry_canvas', 'foundry_canvas_edit']);
+    expect(
+      createToolRegistry({ writeEnabled: false, toolsets: ['canvas'] }).getToolNames(),
+    ).toEqual(['foundry_canvas']);
   });
 
   it('offers map generation only when a ComfyUI server is configured', () => {

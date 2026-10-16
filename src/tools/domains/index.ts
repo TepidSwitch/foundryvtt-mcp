@@ -5,6 +5,7 @@
 import type { Tool } from '../base.js';
 import { actorsEditTool, actorsTool } from './actors.js';
 import { audioEditTool, audioTool } from './audio.js';
+import { canvasEditTool, canvasTool } from './canvas.js';
 import { chatEditTool, chatTool } from './chat.js';
 import { combatEditTool, combatTool } from './combat.js';
 import { compendiumTool } from './compendium.js';
@@ -30,6 +31,8 @@ export const ALL_DOMAIN_TOOLS: Tool[] = [
   effectsEditTool,
   scenesTool,
   scenesEditTool,
+  canvasTool,
+  canvasEditTool,
   tokensEditTool,
   combatTool,
   combatEditTool,
