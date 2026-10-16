@@ -1749,6 +1749,82 @@ export class FoundryClient {
   }
 
   // ==========================================================================
+  // Generic document writes (WRITE — Socket.IO modifyDocument)
+  // ==========================================================================
+
+  private assertDocumentWrite(ids: string[], parentUuid?: string): void {
+    this.assertWriteable();
+    for (const id of ids) {
+      if (!FOUNDRY_ID_PATTERN.test(id)) {
+        throw new Error(`Invalid document id format: ${id}`);
+      }
+    }
+    if (parentUuid !== undefined && !parentUuid.includes('.')) {
+      throw new Error(`Invalid parent UUID: ${parentUuid}`);
+    }
+  }
+
+  /**
+   * Creates documents of any type. Embedded documents need `parentUuid`
+   * (e.g. `Playlist.<id>`). Goes through the audit log, dry-run and cache.
+   * @returns the created documents as the server stored them
+   */
+  async createDocuments(
+    type: string,
+    data: Array<Record<string, unknown>>,
+    parentUuid?: string,
+  ): Promise<Array<Record<string, unknown>>> {
+    this.assertDocumentWrite([], parentUuid);
+    if (data.length === 0) {
+      throw new Error(`Nothing to create: no ${type} data given`);
+    }
+    const result = await this.modifyDocument(type, 'create', {
+      data,
+      ...(parentUuid ? { parentUuid } : {}),
+    });
+    return result as Array<Record<string, unknown>>;
+  }
+
+  /**
+   * Updates documents of any type. Each update carries `_id` plus the changed
+   * fields (dot-notation keys merge, nested arrays of embedded documents merge
+   * by `_id`). Use the `ForcedDeletion` operator to remove a key.
+   */
+  async updateDocuments(
+    type: string,
+    updates: Array<Record<string, unknown>>,
+    parentUuid?: string,
+  ): Promise<Array<Record<string, unknown>>> {
+    this.assertDocumentWrite(
+      updates.map((u) => String(u._id)),
+      parentUuid,
+    );
+    if (updates.length === 0) {
+      throw new Error(`Nothing to update: no ${type} updates given`);
+    }
+    const result = await this.modifyDocument(type, 'update', {
+      updates,
+      ...(parentUuid ? { parentUuid } : {}),
+      diff: true,
+      recursive: true,
+    });
+    return result as Array<Record<string, unknown>>;
+  }
+
+  /** Deletes documents of any type by id. Embedded documents need `parentUuid`. */
+  async deleteDocuments(type: string, ids: string[], parentUuid?: string): Promise<string[]> {
+    this.assertDocumentWrite(ids, parentUuid);
+    if (ids.length === 0) {
+      throw new Error(`Nothing to delete: no ${type} ids given`);
+    }
+    const result = await this.modifyDocument(type, 'delete', {
+      ids,
+      ...(parentUuid ? { parentUuid } : {}),
+    });
+    return result as string[];
+  }
+
+  // ==========================================================================
   // Scene methods
   // ==========================================================================
 
