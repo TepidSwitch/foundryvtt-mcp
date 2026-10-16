@@ -11,7 +11,11 @@ import {
   handleSearchScenes,
   handleSuggestScenes,
 } from '../handlers/scenes.js';
-import { handleMoveToken } from '../handlers/token-mutations.js';
+import {
+  handleDeleteToken,
+  handleMoveToken,
+  handleUpdateToken,
+} from '../handlers/token-mutations.js';
 
 export const scenesTool = new DomainTool({
   name: 'foundry_scenes',
@@ -101,6 +105,37 @@ export const tokensEditTool = new DomainTool({
         name: z.string().optional().describe('Override the token name'),
       }),
       run: (a, ctx) => handlePlaceActorOnScene(a, ctx.foundryClient),
+    }),
+    update: action({
+      description:
+        'Change a placed token: name, hidden, disposition, size (grid squares, sets width and height), width, height, elevation, rotation, alpha, locked. Only the fields you give change.',
+      schema: z.object({
+        tokenId: z.string().describe('Id of the token'),
+        sceneId: z.string().optional().describe('Scene to look in'),
+        name: z.string().optional().describe('Token name'),
+        hidden: z.boolean().optional().describe('Hide from players'),
+        disposition: z
+          .enum(['secret', 'hostile', 'neutral', 'friendly'])
+          .optional()
+          .describe('Token disposition'),
+        size: z.number().positive().optional().describe('Size in grid squares (width and height)'),
+        width: z.number().positive().optional().describe('Width in grid squares'),
+        height: z.number().positive().optional().describe('Height in grid squares'),
+        elevation: z.number().optional().describe('Elevation'),
+        rotation: z.number().optional().describe('Rotation in degrees'),
+        alpha: z.number().min(0).max(1).optional().describe('Opacity 0-1'),
+        locked: z.boolean().optional().describe('Lock the token against movement'),
+      }),
+      run: (a, ctx) => handleUpdateToken(a, ctx.foundryClient),
+    }),
+    delete: action({
+      description:
+        'Remove a token from its scene; the actor is untouched. Confirm with the user first; foundry_history_edit undo can put it back.',
+      schema: z.object({
+        tokenId: z.string().describe('Id of the token to remove'),
+        sceneId: z.string().optional().describe('Scene to look in'),
+      }),
+      run: (a, ctx) => handleDeleteToken(a, ctx.foundryClient),
     }),
     move: action({
       description:

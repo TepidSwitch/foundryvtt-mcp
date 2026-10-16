@@ -11,6 +11,11 @@ import {
   handleUpdateActorItem,
 } from '../handlers/item-mutations.js';
 import { handleSearchItems } from '../handlers/items.js';
+import {
+  handleCreateWorldItem,
+  handleDeleteWorldItem,
+  handleUpdateWorldItem,
+} from '../handlers/world-items.js';
 
 export const itemsTool = new DomainTool({
   name: 'foundry_items',
@@ -41,8 +46,38 @@ export const itemsEditTool = new DomainTool({
   write: true,
   destructive: true,
   description:
-    'WRITE: add, change or remove items on actors in the live world (D&D 5e v4+ activity schema). Needs FOUNDRY_WRITE_ENABLED=true and a GM login; writes are logged and revertible with foundry_history_edit.',
+    'WRITE: add, change or remove items - on actors, or world items - in the live world (D&D 5e v4+ activity schema). Needs FOUNDRY_WRITE_ENABLED=true and a GM login; writes are logged and revertible with foundry_history_edit.',
   actions: {
+    create: action({
+      description:
+        'Create a world item (not on any actor). Give type (weapon, equipment, consumable, loot, spell, feat, ...) and optionally system data in the dnd5e schema. To put an item on an actor use add_to_actor.',
+      schema: z.object({
+        name: z.string().describe('Item name'),
+        type: z.string().describe('Item type'),
+        img: z.string().optional().describe('Icon path'),
+        system: z.record(z.string(), z.unknown()).optional().describe('System data for the item'),
+        folder: z.string().optional().describe('Existing Item folder (id or name)'),
+      }),
+      run: (a, ctx) => handleCreateWorldItem(a, ctx.foundryClient),
+    }),
+    update: action({
+      description:
+        'Change a world item (id or name): name, icon, folder, or system data (objects merge recursively, other values replace).',
+      schema: z.object({
+        item: z.string().describe('World item id or name'),
+        name: z.string().optional().describe('New name'),
+        img: z.string().optional().describe('New icon path'),
+        folder: z.string().optional().describe('Existing Item folder (id or name)'),
+        system: z.record(z.string(), z.unknown()).optional().describe('System data to merge'),
+      }),
+      run: (a, ctx) => handleUpdateWorldItem(a, ctx.foundryClient),
+    }),
+    delete: action({
+      description:
+        'Delete a world item (id or name). Confirm with the user first; foundry_history_edit undo can re-create it. Copies on actors are separate and untouched.',
+      schema: z.object({ item: z.string().describe('World item id or name') }),
+      run: (a, ctx) => handleDeleteWorldItem(a, ctx.foundryClient),
+    }),
     add_to_actor: action({
       description:
         'Create an item on an actor from an inline item document or a compendium entry. Replacing an item is not atomic: add the replacement first, then remove the old one.',

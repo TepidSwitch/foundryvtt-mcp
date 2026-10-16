@@ -189,3 +189,106 @@ ${summary}`,
     ],
   };
 }
+
+// ---------------------------------------------------------------------------
+// update / delete
+// ---------------------------------------------------------------------------
+
+const TOKEN_DISPOSITIONS: Record<string, number> = {
+  secret: -2,
+  hostile: -1,
+  neutral: 0,
+  friendly: 1,
+};
+
+export interface TokenUpdateFields {
+  name?: string;
+  hidden?: boolean;
+  disposition?: 'secret' | 'hostile' | 'neutral' | 'friendly';
+  /** Size in grid squares; sets width and height together. */
+  size?: number;
+  width?: number;
+  height?: number;
+  elevation?: number;
+  rotation?: number;
+  alpha?: number;
+  locked?: boolean;
+}
+
+/** Updates properties of a placed token (name, visibility, disposition, size, elevation, ...). */
+export async function handleUpdateToken(
+  args: { tokenId: string; sceneId?: string } & TokenUpdateFields,
+  foundryClient: FoundryClient,
+) {
+  const located = foundryClient.findToken(args.tokenId, args.sceneId);
+  if (!located) {
+    throw new McpError(
+      ErrorCode.InvalidRequest,
+      `Token not found: ${args.tokenId}${args.sceneId ? ` on scene ${args.sceneId}` : ''}`,
+    );
+  }
+  const patch: Record<string, unknown> = {};
+  for (const k of ['name', 'hidden', 'elevation', 'rotation', 'alpha', 'locked'] as const) {
+    if (args[k] !== undefined) {
+      patch[k] = args[k];
+    }
+  }
+  if (args.disposition !== undefined) {
+    patch.disposition = TOKEN_DISPOSITIONS[args.disposition];
+  }
+  if (args.size !== undefined) {
+    patch.width = args.size;
+    patch.height = args.size;
+  }
+  if (args.width !== undefined) {
+    patch.width = args.width;
+  }
+  if (args.height !== undefined) {
+    patch.height = args.height;
+  }
+  if (Object.keys(patch).length === 0) {
+    throw new McpError(ErrorCode.InvalidParams, 'Give at least one field to change');
+  }
+  const oldName = (located.token as TokenActorRef).name ?? args.tokenId;
+  return withToolError('update token', async () => {
+    await foundryClient.updateDocuments(
+      'Token',
+      [{ _id: args.tokenId, ...patch }],
+      `Scene.${located.scene._id}`,
+    );
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `✏️ **Token Updated** "${oldName}" on ${located.scene.name}: ${Object.keys(patch).join(', ')}`,
+        },
+      ],
+    };
+  });
+}
+
+/** Removes a token from its scene. */
+export async function handleDeleteToken(
+  args: { tokenId: string; sceneId?: string },
+  foundryClient: FoundryClient,
+) {
+  const located = foundryClient.findToken(args.tokenId, args.sceneId);
+  if (!located) {
+    throw new McpError(
+      ErrorCode.InvalidRequest,
+      `Token not found: ${args.tokenId}${args.sceneId ? ` on scene ${args.sceneId}` : ''}`,
+    );
+  }
+  return withToolError('delete token', async () => {
+    await foundryClient.deleteDocuments('Token', [args.tokenId], `Scene.${located.scene._id}`);
+    const name = (located.token as TokenActorRef).name ?? args.tokenId;
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `🗑️ **Token Deleted** "${name}" from ${located.scene.name}. The actor is untouched. Undo with foundry_history_edit undo.`,
+        },
+      ],
+    };
+  });
+}
