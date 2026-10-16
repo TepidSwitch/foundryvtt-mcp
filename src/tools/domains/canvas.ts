@@ -13,6 +13,7 @@ import {
   handleRemoveRegion,
   handleUpdateRegion,
 } from '../handlers/canvas-regions.js';
+import { handleAddTile, handleRemoveTile, handleUpdateTile } from '../handlers/canvas-tiles.js';
 import {
   handleAddRoom,
   handleAddWalls,
@@ -87,6 +88,15 @@ const regionFields = {
     .describe('Highest elevation it covers; null for unbounded'),
 };
 
+const tileFields = {
+  rotation: z.number().optional().describe('Rotation in degrees'),
+  alpha: z.number().min(0).max(1).optional().describe('Opacity 0-1'),
+  hidden: z.boolean().optional().describe('Hide from players'),
+  locked: z.boolean().optional().describe('Lock against editing'),
+  elevation: z.number().optional().describe('Elevation'),
+  sort: z.number().int().optional().describe('Stacking order; higher draws on top'),
+};
+
 export const canvasTool = new DomainTool({
   name: 'foundry_canvas',
   title: 'Foundry canvas',
@@ -100,7 +110,7 @@ export const canvasTool = new DomainTool({
         'List one kind of canvas object on a scene. For walls, filter by door/wall/window/terrain/invisible/ethereal/"secret door" or give x, y, width, height (squares) to see only walls with an end inside that area. Scenes can hold hundreds of walls, so narrow before raising limit.',
       schema: z.object({
         scene,
-        kind: z.enum(['walls', 'regions']).describe('What to list'),
+        kind: z.enum(['walls', 'regions', 'tiles']).describe('What to list'),
         filter: z
           .enum([
             'all',
@@ -230,6 +240,40 @@ export const canvasEditTool = new DomainTool({
         'Delete a region, including its behaviors. Confirm first; foundry_history_edit undo re-creates it.',
       schema: z.object({ scene, region: z.string().describe('Region id or exact name') }),
       run: (a, ctx) => handleRemoveRegion(a, ctx.foundryClient),
+    }),
+    add_tile: action({
+      description:
+        'Place an image on the scene as a tile. image is a path in the Foundry data folder (upload one with foundry_files_edit). x,y is the top-left corner.',
+      schema: z.object({
+        scene,
+        image: z.string().describe('Image path, e.g. "worlds/my-world/mcp-uploads/tree.png"'),
+        x: col('Left edge'),
+        y: row('Top edge'),
+        width: squaresLong('Width'),
+        height: squaresLong('Height'),
+        ...tileFields,
+      }),
+      run: (a, ctx) => handleAddTile(a, ctx.foundryClient),
+    }),
+    update_tile: action({
+      description:
+        'Change a tile: image, position (give both x and y), size, rotation, opacity, hidden, locked, elevation, order.',
+      schema: z.object({
+        scene,
+        tile: z.string().describe('Tile id'),
+        image: z.string().optional().describe('New image path'),
+        x: col('New left edge').optional(),
+        y: row('New top edge').optional(),
+        width: squaresLong('New width').optional(),
+        height: squaresLong('New height').optional(),
+        ...tileFields,
+      }),
+      run: (a, ctx) => handleUpdateTile(a, ctx.foundryClient),
+    }),
+    remove_tile: action({
+      description: 'Remove a tile. foundry_history_edit undo puts it back.',
+      schema: z.object({ scene, tile: z.string().describe('Tile id') }),
+      run: (a, ctx) => handleRemoveTile(a, ctx.foundryClient),
     }),
   },
 });

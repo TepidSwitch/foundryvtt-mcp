@@ -5,10 +5,11 @@
 import type { FoundryClient } from '../../foundry/client.js';
 import { sceneFor, text } from './canvas-common.js';
 import { listRegions } from './canvas-regions.js';
+import { listTiles } from './canvas-tiles.js';
 import { listWalls } from './canvas-walls.js';
 import { withToolError } from './utils.js';
 
-export type CanvasKind = 'walls' | 'regions';
+export type CanvasKind = 'walls' | 'regions' | 'tiles';
 
 export async function handleCanvasList(
   args: {
@@ -45,6 +46,8 @@ export async function handleCanvasList(
       }
       case 'regions':
         return text(listRegions(g, args.limit));
+      case 'tiles':
+        return text(listTiles(g, args.limit));
     }
   });
 }

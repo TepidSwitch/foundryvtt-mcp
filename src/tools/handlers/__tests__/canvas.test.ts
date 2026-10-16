@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { FoundryClient } from '../../../foundry/client.js';
 import { handleCanvasList } from '../canvas.js';
 import { handleAddRegion, handleRemoveRegion, handleUpdateRegion } from '../canvas-regions.js';
+import { handleAddTile, handleRemoveTile, handleUpdateTile } from '../canvas-tiles.js';
 import {
   buildWall,
   handleAddRoom,
@@ -315,5 +316,58 @@ describe('regions', () => {
     expect(text(await handleCanvasList({ scene: 'Inn', kind: 'regions' }, mock))).toContain(
       '**Fountain**',
     );
+  });
+});
+
+describe('tiles', () => {
+  it('adds and moves a tile in whole pixels', async () => {
+    const { mock, createDocuments, updateDocuments } = client();
+    await handleAddTile(
+      {
+        scene: 'Inn',
+        image: 'a/tree.png',
+        x: 1,
+        y: 1,
+        width: 2.5,
+        height: 1,
+        alpha: 0.5,
+        hidden: true,
+      },
+      mock,
+    );
+    expect(createDocuments).toHaveBeenCalledWith(
+      'Tile',
+      [
+        {
+          texture: { src: 'a/tree.png' },
+          x: 600,
+          y: 500,
+          width: 250,
+          height: 100,
+          alpha: 0.5,
+          hidden: true,
+        },
+      ],
+      `Scene.${SCENE}`,
+    );
+    await handleUpdateTile(
+      { scene: 'Inn', tile: 'TILEAAAAAAAAAAAA', x: 2, y: 2, image: 'b.png' },
+      mock,
+    );
+    expect(updateDocuments).toHaveBeenCalledWith(
+      'Tile',
+      [{ _id: 'TILEAAAAAAAAAAAA', 'texture.src': 'b.png', x: 700, y: 600 }],
+      `Scene.${SCENE}`,
+    );
+    await expect(
+      handleUpdateTile({ scene: 'Inn', tile: 'TILEAAAAAAAAAAAA', x: 2 }, mock),
+    ).rejects.toThrow(/both x and y/);
+    await expect(
+      handleAddTile({ scene: 'Inn', image: 'a.png', x: 1, y: 1, width: 0, height: 1 }, mock),
+    ).rejects.toThrow(/positive/);
+    expect(text(await handleCanvasList({ scene: 'Inn', kind: 'tiles' }, mock))).toContain(
+      'tree.png at (1, 1) 2×1 sq',
+    );
+    await handleRemoveTile({ scene: 'Inn', tile: 'TILEAAAAAAAAAAAA' }, mock);
   });
 });

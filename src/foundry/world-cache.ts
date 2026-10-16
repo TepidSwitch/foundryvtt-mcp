@@ -60,6 +60,7 @@ const EMBEDDED_COLLECTIONS: Record<string, Record<string, string>> = {
     Wall: 'walls',
     Drawing: 'drawings',
     Note: 'notes',
+    Tile: 'tiles',
     Region: 'regions',
   },
   Combat: { Combatant: 'combatants' },
