@@ -67,7 +67,7 @@ after editing; closing the window is not enough.
 | --- | --- | --- |
 | `FOUNDRY_ENV_FILE` | auto | Secrets file path |
 | `FOUNDRY_DRY_RUN` | `false` | Log writes but send nothing; tool output carries a DRY RUN banner |
-| `FOUNDRY_TOOLSETS` | all but `script` | Comma-separated toolsets to expose: `actors`, `items`, `effects`, `scenes`, `tokens`, `combat`, `journals`, `compendium`, `audio`, `chat`, `world`, `files`, `generate`, `history`, `diagnostics`, `script`. Unknown names are ignored with a warning |
+| `FOUNDRY_TOOLSETS` | all but `canvas` and `script` | Comma-separated toolsets to expose: `actors`, `items`, `effects`, `scenes`, `tokens`, `combat`, `journals`, `compendium`, `audio`, `chat`, `world`, `files`, `generate`, `history`, `diagnostics`, `script`. Unknown names are ignored with a warning |
 | `COMFYUI_URL` | unset | Base URL of a ComfyUI server, e.g. `http://192.168.1.50:8188`. Turns on AI map generation (`foundry_generate_edit`); see [AI map generation](#ai-map-generation-optional) |
 | `COMFYUI_CHECKPOINT` | `dDBattlemapsSDXL10_upscaleV10.safetensors` | SDXL checkpoint file name, as ComfyUI lists it |
 | `COMFYUI_VAE` | `sdxl_vae.safetensors` | VAE file name, as ComfyUI lists it |
@@ -93,6 +93,7 @@ hidden, and refused if called, unless `FOUNDRY_WRITE_ENABLED=true`.
 | audio | `foundry_audio`: list | `foundry_audio_edit`: play, stop, create_playlist, add_sound, update, delete, set_scene_music |
 | chat | `foundry_chat`: read, roll | `foundry_chat_edit`: send, request_roll, draw_table |
 | world | `foundry_world`: summary, search, browse, users, refresh | `foundry_world_edit`: create_folder, move_to_folder |
+| canvas (off by default) | `foundry_canvas`: list | `foundry_canvas_edit`: add_walls, add_room, set_door, remove_walls, add_region, update_region, remove_region, add_tile, update_tile, remove_tile, add_drawing, update_drawing, remove_drawing |
 | files | `foundry_files`: browse | `foundry_files_edit`: mkdir, upload |
 | generate | `foundry_generate`: npc, loot, map_status, rule | `foundry_generate_edit`: map, cancel_map (needs `COMFYUI_URL`) |
 | history | `foundry_history`: log | `foundry_history_edit`: undo |
@@ -101,6 +102,27 @@ hidden, and refused if called, unless `FOUNDRY_WRITE_ENABLED=true`.
 That is 13 tools read-only and 24 with writes enabled (25 with `COMFYUI_URL` set, which adds `foundry_generate_edit`).
 
 Positions for notes, lights and tokens are grid squares from the top-left of the map image. Roll requests and item cards post dnd5e inline enrichers (`[[/check ...]]`, `[[/save ...]]`, `[[/item ...]]`) that players click in chat; no Foundry module is needed.
+
+## Canvas editing (off by default)
+
+Walls, doors, regions, tiles and drawings are low-level scene edits, so they sit in the
+`canvas` toolset, which is off unless you name it, for example
+`FOUNDRY_TOOLSETS=actors,items,scenes,combat,journals,chat,world,history,diagnostics,canvas`
+(or just `canvas` next to your usual list). Naming it adds `foundry_canvas` (read) and
+`foundry_canvas_edit` (write, only with `FOUNDRY_WRITE_ENABLED=true`).
+
+- Positions are grid squares from the top-left of the map image; `(0,0)` is that corner.
+  Wall ends sit on grid lines. The scene's padding and shift are handled for you.
+- `foundry_canvas list` shows ids and positions. A scene can have hundreds of walls, so
+  filter by category (`doors`, `terrain`, ...) or give an area (`x`, `y`, `width`, `height`).
+- `add_walls` and `add_room` are a single write, so one `foundry_history_edit undo` removes
+  every wall they added. `add_room` can leave a door in one side.
+- Wall kinds: `wall`, `door`, `secret_door`, `window` (movement blocked, sight passes),
+  `invisible` (movement only), `terrain` (limits sight), `ethereal` (sight only).
+- Regions are the v14 replacement for measured templates. Shapes: rectangle, circle,
+  ellipse, cone, ring, polygon. They are created without behaviors; add teleports and
+  triggers in Foundry.
+- Tiles take an image path from the data folder (upload one with `foundry_files_edit`).
 
 ## Files
 
