@@ -108,7 +108,10 @@ Positions for notes, lights and tokens are grid squares from the top-left of the
 file from the machine running this server (image, audio, video or PDF, up to 25 MB) to
 `worlds/<world>/mcp-uploads/` unless you give a folder, and returns the path to use for
 a scene background or token. Folders under `modules/` and `systems/` are refused.
-Uploads cannot be undone from here; remove a file with the webdav tools.
+Uploads cannot be undone from here; remove a file with the webdav tools. Their root is
+Foundry's user folder, so the data folder is `/Data/...`: delete the file path first
+(`/Data/worlds/<world>/mcp-uploads/<file>`), then the folder with a trailing slash. The
+tool says "Path does not exist" for a bare folder path.
 
 ## AI map generation (optional)
 
