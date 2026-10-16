@@ -16,6 +16,7 @@ import { itemsEditTool, itemsTool } from './items.js';
 import { journalsEditTool, journalsTool } from './journals.js';
 import { scenesEditTool, scenesTool, tokensEditTool } from './scenes.js';
 import { worldTool } from './world.js';
+import { worldEditTool } from './world-edit.js';
 
 export const ALL_DOMAIN_TOOLS: Tool[] = [
   actorsTool,
@@ -35,6 +36,7 @@ export const ALL_DOMAIN_TOOLS: Tool[] = [
   audioEditTool,
   chatTool,
   worldTool,
+  worldEditTool,
   generateTool,
   historyTool,
   historyEditTool,
