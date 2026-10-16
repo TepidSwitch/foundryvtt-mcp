@@ -4,10 +4,11 @@
 
 import type { FoundryClient } from '../../foundry/client.js';
 import { sceneFor, text } from './canvas-common.js';
+import { listRegions } from './canvas-regions.js';
 import { listWalls } from './canvas-walls.js';
 import { withToolError } from './utils.js';
 
-export type CanvasKind = 'walls';
+export type CanvasKind = 'walls' | 'regions';
 
 export async function handleCanvasList(
   args: {
@@ -42,6 +43,8 @@ export async function handleCanvasList(
           }),
         );
       }
+      case 'regions':
+        return text(listRegions(g, args.limit));
     }
   });
 }

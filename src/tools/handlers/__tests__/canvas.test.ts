@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { FoundryClient } from '../../../foundry/client.js';
 import { handleCanvasList } from '../canvas.js';
+import { handleAddRegion, handleRemoveRegion, handleUpdateRegion } from '../canvas-regions.js';
 import {
   buildWall,
   handleAddRoom,
@@ -224,5 +225,95 @@ describe('walls', () => {
     );
     expect(area).toContain('2 matches');
     expect(area).not.toContain('WALLFAR');
+  });
+});
+
+describe('regions', () => {
+  it('builds v14 shape data in canvas pixels', async () => {
+    const { mock, createDocuments } = client();
+    await handleAddRegion(
+      {
+        scene: 'Inn',
+        name: 'Trap',
+        shapes: [
+          { type: 'rectangle', x: 1, y: 1, width: 2, height: 1 },
+          { type: 'circle', x: 5, y: 5, radius: 1.5, hole: true },
+          { type: 'cone', x: 2, y: 2, radius: 3, angle: 90, rotation: 45 },
+          { type: 'polygon', points: [0, 0, 2, 0, 1, 2] },
+        ],
+        color: '#ff0000',
+        visibility: 'gamemaster',
+        elevation_top: 10,
+      },
+      mock,
+    );
+    const [type, data, parent] = createDocuments.mock.calls[0] as unknown as [
+      string,
+      Array<Record<string, unknown>>,
+      string,
+    ];
+    expect([type, parent]).toEqual(['Region', `Scene.${SCENE}`]);
+    expect(data[0]).toMatchObject({
+      name: 'Trap',
+      color: '#ff0000',
+      visibility: 1,
+      elevation: { top: 10 },
+    });
+    expect(data[0]?.shapes).toEqual([
+      {
+        type: 'rectangle',
+        hole: false,
+        x: 600,
+        y: 500,
+        width: 200,
+        height: 100,
+        rotation: 0,
+        anchorX: 0,
+        anchorY: 0,
+        gridBased: false,
+      },
+      { type: 'circle', hole: true, x: 1000, y: 900, radius: 150, gridBased: false },
+      {
+        type: 'cone',
+        hole: false,
+        x: 700,
+        y: 600,
+        radius: 300,
+        angle: 90,
+        rotation: 45,
+        curvature: 'round',
+        gridBased: false,
+      },
+      { type: 'polygon', hole: false, points: [500, 400, 700, 400, 600, 600] },
+    ]);
+  });
+
+  it('says what a shape is missing, then updates and removes by name', async () => {
+    const { mock, updateDocuments, deleteDocuments } = client();
+    await expect(
+      handleAddRegion({ scene: 'Inn', name: 'x', shapes: [{ type: 'circle', x: 1, y: 1 }] }, mock),
+    ).rejects.toThrow(/circle region shape needs radius/);
+    await expect(
+      handleAddRegion(
+        { scene: 'Inn', name: 'x', shapes: [{ type: 'polygon', points: [0, 0, 1, 1] }] },
+        mock,
+      ),
+    ).rejects.toThrow(/at least 3 points/);
+    await handleUpdateRegion(
+      { scene: 'Inn', region: 'fountain', hidden: true, elevation_bottom: null, name: 'Well' },
+      mock,
+    );
+    expect(updateDocuments).toHaveBeenCalledWith(
+      'Region',
+      [{ _id: 'REGIONAAAAAAAAAA', hidden: true, 'elevation.bottom': null, name: 'Well' }],
+      `Scene.${SCENE}`,
+    );
+    expect(
+      text(await handleRemoveRegion({ scene: 'Inn', region: 'REGIONAAAAAAAAAA' }, mock)),
+    ).toContain('had 1 behavior');
+    expect(deleteDocuments).toHaveBeenCalledWith('Region', ['REGIONAAAAAAAAAA'], `Scene.${SCENE}`);
+    expect(text(await handleCanvasList({ scene: 'Inn', kind: 'regions' }, mock))).toContain(
+      '**Fountain**',
+    );
   });
 });

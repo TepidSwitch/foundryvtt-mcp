@@ -9,6 +9,11 @@ import { z } from 'zod';
 import { action, DomainTool } from '../domain.js';
 import { handleCanvasList } from '../handlers/canvas.js';
 import {
+  handleAddRegion,
+  handleRemoveRegion,
+  handleUpdateRegion,
+} from '../handlers/canvas-regions.js';
+import {
   handleAddRoom,
   handleAddWalls,
   handleRemoveWalls,
@@ -33,6 +38,55 @@ const doorState = z
   .optional()
   .describe('Door state (default closed)');
 
+const shape = z.object({
+  type: z
+    .enum(['rectangle', 'circle', 'ellipse', 'cone', 'ring', 'polygon'])
+    .describe('Shape type'),
+  x: z
+    .number()
+    .optional()
+    .describe('rectangle: left edge; circle, ellipse, cone, ring: centre/origin (squares)'),
+  y: z
+    .number()
+    .optional()
+    .describe('rectangle: top edge; circle, ellipse, cone, ring: centre/origin (squares)'),
+  width: z.number().optional().describe('rectangle width (squares)'),
+  height: z.number().optional().describe('rectangle height (squares)'),
+  radius: z.number().optional().describe('circle, cone, ring radius (squares)'),
+  radius_x: z.number().optional().describe('ellipse horizontal radius (squares)'),
+  radius_y: z.number().optional().describe('ellipse vertical radius (squares)'),
+  angle: z.number().optional().describe('cone opening angle in degrees'),
+  rotation: z.number().optional().describe('rotation in degrees (rectangle, ellipse, cone)'),
+  inner_width: z.number().optional().describe('ring inner band width (squares)'),
+  outer_width: z.number().optional().describe('ring outer band width (squares)'),
+  points: z
+    .array(z.number())
+    .optional()
+    .describe('polygon corners [x1, y1, x2, y2, x3, y3, ...] in squares'),
+  hole: z.boolean().optional().describe('Cut this shape out of the region'),
+});
+
+const regionFields = {
+  color: z.string().optional().describe('Region colour, e.g. "#ff0000"'),
+  hidden: z.boolean().optional().describe('Hide the region'),
+  locked: z.boolean().optional().describe('Lock it against editing'),
+  visibility: z
+    .enum(['layer', 'layer_unlocked', 'gamemaster', 'observer', 'always'])
+    .optional()
+    .describe('Who sees it on the map (default layer_unlocked)'),
+  display_measurements: z.boolean().optional().describe('Show measurements'),
+  elevation_bottom: z
+    .number()
+    .nullable()
+    .optional()
+    .describe('Lowest elevation it covers; null for unbounded'),
+  elevation_top: z
+    .number()
+    .nullable()
+    .optional()
+    .describe('Highest elevation it covers; null for unbounded'),
+};
+
 export const canvasTool = new DomainTool({
   name: 'foundry_canvas',
   title: 'Foundry canvas',
@@ -46,7 +100,7 @@ export const canvasTool = new DomainTool({
         'List one kind of canvas object on a scene. For walls, filter by door/wall/window/terrain/invisible/ethereal/"secret door" or give x, y, width, height (squares) to see only walls with an end inside that area. Scenes can hold hundreds of walls, so narrow before raising limit.',
       schema: z.object({
         scene,
-        kind: z.enum(['walls']).describe('What to list'),
+        kind: z.enum(['walls', 'regions']).describe('What to list'),
         filter: z
           .enum([
             'all',
@@ -148,6 +202,34 @@ export const canvasEditTool = new DomainTool({
         'Remove walls by id (up to 200). Confirm with the user first; one foundry_history_edit undo restores them all.',
       schema: z.object({ scene, walls: z.array(z.string()).min(1).describe('Wall ids') }),
       run: (a, ctx) => handleRemoveWalls(a, ctx.foundryClient),
+    }),
+    add_region: action({
+      description:
+        'Create a region (a scene area) from one or more shapes. Regions are the v14 replacement for measured templates. They are created without behaviors; add teleport/trigger behaviors in Foundry.',
+      schema: z.object({
+        scene,
+        name: z.string().describe('Region name'),
+        shapes: z.array(shape).min(1).describe('Shapes that make up the region'),
+        ...regionFields,
+      }),
+      run: (a, ctx) => handleAddRegion(a, ctx.foundryClient),
+    }),
+    update_region: action({
+      description:
+        'Change a region (id or name): name, colour, hidden, locked, visibility, elevation range.',
+      schema: z.object({
+        scene,
+        region: z.string().describe('Region id or exact name'),
+        name: z.string().optional().describe('New name'),
+        ...regionFields,
+      }),
+      run: (a, ctx) => handleUpdateRegion(a, ctx.foundryClient),
+    }),
+    remove_region: action({
+      description:
+        'Delete a region, including its behaviors. Confirm first; foundry_history_edit undo re-creates it.',
+      schema: z.object({ scene, region: z.string().describe('Region id or exact name') }),
+      run: (a, ctx) => handleRemoveRegion(a, ctx.foundryClient),
     }),
   },
 });
