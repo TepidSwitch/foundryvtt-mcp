@@ -67,7 +67,7 @@ after editing; closing the window is not enough.
 | --- | --- | --- |
 | `FOUNDRY_ENV_FILE` | auto | Secrets file path |
 | `FOUNDRY_DRY_RUN` | `false` | Log writes but send nothing; tool output carries a DRY RUN banner |
-| `FOUNDRY_TOOLSETS` | all but `canvas` and `script` | Comma-separated toolsets to expose: `actors`, `items`, `effects`, `scenes`, `tokens`, `combat`, `journals`, `compendium`, `audio`, `chat`, `world`, `files`, `generate`, `history`, `diagnostics`, `script`. Unknown names are ignored with a warning |
+| `FOUNDRY_TOOLSETS` | all but `canvas` and `script` | Comma-separated toolsets to expose: `actors`, `items`, `effects`, `scenes`, `tokens`, `combat`, `journals`, `compendium`, `audio`, `chat`, `world`, `files`, `generate`, `history`, `diagnostics`, `canvas`, `script`. Setting it replaces the default list, so name every toolset you want. Unknown names are ignored with a warning |
 | `COMFYUI_URL` | unset | Base URL of a ComfyUI server, e.g. `http://192.168.1.50:8188`. Turns on AI map generation (`foundry_generate_edit`); see [AI map generation](#ai-map-generation-optional) |
 | `COMFYUI_CHECKPOINT` | `dDBattlemapsSDXL10_upscaleV10.safetensors` | SDXL checkpoint file name, as ComfyUI lists it |
 | `COMFYUI_VAE` | `sdxl_vae.safetensors` | VAE file name, as ComfyUI lists it |
@@ -100,7 +100,7 @@ hidden, and refused if called, unless `FOUNDRY_WRITE_ENABLED=true`.
 | history | `foundry_history`: log | `foundry_history_edit`: undo |
 | diagnostics | `foundry_diagnostics`: health, system, search_logs, logs, diagnose | |
 
-That is 13 tools read-only and 24 with writes enabled (25 with `COMFYUI_URL` set, which adds `foundry_generate_edit`).
+That is 13 tools read-only and 24 with writes enabled (25 with `COMFYUI_URL` set, which adds `foundry_generate_edit`). The off-by-default toolsets add `foundry_canvas` and `foundry_canvas_edit` (`canvas`) and `foundry_script` (`script`, needs writes).
 
 Positions for notes, lights and tokens are grid squares from the top-left of the map image. Roll requests and item cards post dnd5e inline enrichers (`[[/check ...]]`, `[[/save ...]]`, `[[/item ...]]`) that players click in chat; no Foundry module is needed.
 
@@ -181,25 +181,17 @@ available in this mode.
 
 ## Write safety
 
-- `get_write_log` lists recent writes made through this server (survives
-  restarts).
-- `undo_last_write` reverses the newest one (or a `write_id`): creates are
+- Writes are off unless `FOUNDRY_WRITE_ENABLED=true`; `FOUNDRY_DRY_RUN=true` logs them without sending.
+- `foundry_history log` lists recent writes made through this server (survives restarts).
+- `foundry_history_edit undo` reverses the newest one (or a `write_id`): creates are
   deleted, updates restore the fields they touched, deletes are re-created with
-  their original id. Best effort: later edits to the same document are not
+  their original id. A batch (a script run, or a multi-document write such as `add_room`)
+  is undone as a whole. Best effort: later edits to the same document are not
   detected, and a field an update newly added is not removed.
-- `write_session_notes` turns a markdown recap into a new GM-only journal entry
-  with `@UUID` links for known actor/scene/journal names.
+- `foundry_journals_edit write_session_notes` turns a markdown recap into a new GM-only
+  journal entry with `@UUID` links for known actor/scene/journal names.
 
-## Troubleshooting
-
-| Symptom | Likely cause |
-| --- | --- |
-| `No session cookie returned from /join` | World stopped or host restarting; launch the world and retry (it retries by itself) |
-| `JOIN.ErrorUserDoesNotExist` | Wrong `FOUNDRY_USERNAME` (display name, case-sensitive) or the v14 `userId` patch missing |
-| Generic HTTP 400 on `/join` | Missing `Origin` header (v14 CSRF check); the branch sends it |
-| Desktop shows the server disconnected | Read `mcp-server-foundryvtt-mcp.log` in Desktop's log folder; fully quit and relaunch |
-
-### Script toolset (code mode)
+## Script toolset (code mode)
 
 Name `script` in `FOUNDRY_TOOLSETS` (and set `FOUNDRY_WRITE_ENABLED=true`) to add
 `foundry_script`. The agent sends JavaScript that runs in a QuickJS (WASM) sandbox with no
@@ -218,3 +210,12 @@ resource `foundry://script-api.d.ts`.
 - `foundry.list` and `foundry.get` read the cached world (actors, items, scenes,
   journals, macros, playlists, tables, cards, folders, combats), not compendiums or files.
 - Scripts cannot write `User` or `Setting` documents.
+
+## Troubleshooting
+
+| Symptom | Likely cause |
+| --- | --- |
+| `No session cookie returned from /join` | World stopped or host restarting; launch the world and retry (it retries by itself) |
+| `JOIN.ErrorUserDoesNotExist` | Wrong `FOUNDRY_USERNAME` (display name, case-sensitive) or the v14 `userId` patch missing |
+| Generic HTTP 400 on `/join` | Missing `Origin` header (v14 CSRF check); the branch sends it |
+| Desktop shows the server disconnected | Read `mcp-server-foundryvtt-mcp.log` in Desktop's log folder; fully quit and relaunch |
