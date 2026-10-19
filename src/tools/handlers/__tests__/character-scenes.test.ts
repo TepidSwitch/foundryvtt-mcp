@@ -276,4 +276,36 @@ describe('scene tools', () => {
     expect(out).toContain('Dako / Temples');
     expect(out).toContain('Readiness');
   });
+
+  it('reports token positions as map squares with the scene padding removed', async () => {
+    // 2800x2100 map, 70px grid, padding 0.25 -> origin (700, 560): 560 is 7.5 squares, rounded up to 8.
+    const padded = scene({
+      _id: 'scPadded00000001',
+      name: 'Padded Hall',
+      tokens: [
+        { _id: 'tk1', name: 'Corner', x: 700, y: 560 },
+        { _id: 'tk2', name: 'Inside', x: 700 + 70 * 3, y: 560 + 70 * 2 },
+      ],
+    });
+    const shifted = scene({
+      _id: 'scShifted0000001',
+      name: 'Shifted Hall',
+      shiftX: 70,
+      tokens: [{ _id: 'tk3', name: 'Shifted', x: 770 + 70 * 4, y: 560 }],
+    });
+    const world = { ...snapshot, scenes: [padded, shifted] };
+    const c = {
+      getWorldSnapshot: () => world,
+      getScenes: () => world.scenes,
+    } as unknown as FoundryClient;
+
+    const out = text(await handleGetSceneInfo({ name: 'Padded Hall' }, c));
+    expect(out).toContain('**Map origin:** canvas 700,560 px');
+    expect(out).toMatch(/Corner.* at 0,0 \(canvas 700,560 px\)/);
+    expect(out).toMatch(/Inside.* at 3,2 \(canvas 910,700 px\)/);
+
+    const shiftedOut = text(await handleGetSceneInfo({ name: 'Shifted Hall' }, c));
+    expect(shiftedOut).toContain('**Map origin:** canvas 770,560 px');
+    expect(shiftedOut).toMatch(/Shifted.* at 4,0 \(canvas 1050,560 px\)/);
+  });
 });

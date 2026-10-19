@@ -13,6 +13,7 @@
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
+import { sceneOrigin } from '../../foundry/import.js';
 import type { WorldData, WorldScene } from '../../foundry/types.js';
 import { at, isRec, num, str } from './dnd5e.js';
 import { withToolError } from './utils.js';
@@ -223,6 +224,17 @@ export function tagsFor(name: string, path: string): string[] {
   return TAG_KEYWORDS.filter(([, words]) => words.some((w) => hay.includes(w))).map(([tag]) => tag);
 }
 
+/** Canvas pixels to "col,row" grid squares from the map image's top-left corner. */
+function mapSquare(
+  x: number,
+  y: number,
+  origin: { x: number; y: number },
+  gridSize: number,
+): string {
+  const square = (v: number) => String(Math.round((v / gridSize) * 10) / 10);
+  return `${square(x - origin.x)},${square(y - origin.y)}`;
+}
+
 function factsFor(snapshot: WorldData, scene: WorldScene): SceneFacts {
   const gridSize = num(at(scene, 'grid', 'size'), 100) || 100;
   const tokens = Array.isArray(scene.tokens) ? scene.tokens : [];
@@ -331,11 +343,20 @@ export async function handleGetSceneInfo(
       1: 'friendly',
       [-2]: 'secret',
     };
+    const raw = scene as unknown as Record<string, unknown>;
+    const origin = sceneOrigin({
+      width: scene.width,
+      height: scene.height,
+      padding: scene.padding,
+      gridSize: f.gridSize,
+      shiftX: num(raw.shiftX),
+      shiftY: num(raw.shiftY),
+    });
     const tokenLines = tokens
       .slice(0, 40)
       .map(
         (t) =>
-          `- ${str(t.name) || 'Unnamed'} \`${str(t._id)}\` (${disp[num(t.disposition)] ?? 'unknown'}${t.hidden === true ? ', hidden' : ''}${t.actorLink === true ? ', linked' : ''}) at ${Math.round(num(t.x) / f.gridSize)},${Math.round(num(t.y) / f.gridSize)}`,
+          `- ${str(t.name) || 'Unnamed'} \`${str(t._id)}\` (${disp[num(t.disposition)] ?? 'unknown'}${t.hidden === true ? ', hidden' : ''}${t.actorLink === true ? ', linked' : ''}) at ${mapSquare(num(t.x), num(t.y), origin, f.gridSize)} (canvas ${Math.round(num(t.x))},${Math.round(num(t.y))} px)`,
       );
     const notes = (Array.isArray(scene.notes) ? scene.notes : []).slice(0, 30).map((n) => {
       const entry = snapshot.journal.find((j) => j._id === n.entryId);
@@ -363,10 +384,11 @@ export async function handleGetSceneInfo(
 **Lighting:** darkness ${Math.round(darkness * 100)}%, global light ${globalLight ? 'on' : 'off'}${weather ? `, weather: ${weather}` : ''}
 **Content:** ${f.walls} walls · ${f.lights} lights · ${f.tokens} tokens · ${f.notes} notes · ${f.tiles} tiles · ${f.regions} regions · ${f.sounds} sounds
 **Journal:** ${journal ? journal.name : 'none'} · **Playlist:** ${playlist ? str(playlist.name) : 'none'}
+**Map origin:** canvas ${origin.x},${origin.y} px (scene padding and shift)
 **Tags (from name/folder):** ${f.tags.join(', ') || 'none'}
 **Readiness:** ${r.score}/100 (${band(r.score)}) — ${r.reasons.join(', ') || 'bare map'}
 
-**Tokens** (${tokens.length})
+**Tokens** (${tokens.length}) — positions are grid squares from the top-left of the map image (scene padding removed); canvas px is what foundry_tokens_edit move takes
 ${tokenLines.join('\n') || 'none'}${tokens.length > 40 ? `\n…and ${tokens.length - 40} more` : ''}
 
 **Map notes** (${f.notes})
