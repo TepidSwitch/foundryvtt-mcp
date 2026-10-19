@@ -240,6 +240,7 @@ export class FoundryClient {
   private dryRunWrites = 0;
   private currentUndoOf: string | null = null;
   private currentBatchId: string | null = null;
+  private forceDryRun = false;
   /** Session cookie value from the last login (for the HTTP upload endpoint). */
   private sessionCookie: string | null = null;
   /** Id of the user this session is logged in as (from the `session` event). */
@@ -611,6 +612,26 @@ export class FoundryClient {
   /** Number of writes intercepted by dry-run mode so far. */
   getDryRunWriteCount(): number {
     return this.dryRunWrites;
+  }
+
+  /** Batch id of the running `withBatch`, or null outside one. */
+  getCurrentBatchId(): string | null {
+    return this.currentBatchId;
+  }
+
+  private isDryRun(): boolean {
+    return Boolean(this.config.dryRun) || this.forceDryRun;
+  }
+
+  /** Runs `fn` with every write logged but not sent, whatever FOUNDRY_DRY_RUN says. */
+  async withDryRun<T>(fn: () => Promise<T>): Promise<T> {
+    const previous = this.forceDryRun;
+    this.forceDryRun = true;
+    try {
+      return await fn();
+    } finally {
+      this.forceDryRun = previous;
+    }
   }
 
   /**
@@ -1259,7 +1280,7 @@ export class FoundryClient {
         ? findCachedDocuments(this.worldData, type, touchedIds, parentUuidArg)
         : undefined;
 
-    if (this.config.dryRun) {
+    if (this.isDryRun()) {
       this.dryRunWrites += 1;
       const placeholder =
         action === 'create'
@@ -1906,7 +1927,7 @@ export class FoundryClient {
     this.assertWriteable();
     const path = normalizeDataPath(target);
     assertWritableDataPath(path);
-    if (this.config.dryRun) {
+    if (this.isDryRun()) {
       this.dryRunWrites += 1;
       return [path];
     }
@@ -1949,7 +1970,7 @@ export class FoundryClient {
         `Cannot upload "${name}": ${(buffer.length / 1048576).toFixed(1)} MB is over the ${MAX_UPLOAD_BYTES / 1048576} MB limit`,
       );
     }
-    if (this.config.dryRun) {
+    if (this.isDryRun()) {
       this.dryRunWrites += 1;
       return `${dir}/${name}`;
     }
