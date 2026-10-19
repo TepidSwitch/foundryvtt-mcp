@@ -15,7 +15,10 @@ describe('secrets file', () => {
     expect(defaultSecretsPath({ APPDATA: 'C:\\A' }, 'win32')).toContain('foundryvtt-mcp');
   });
   it('returns null when no default file exists', () => {
-    expect(resolveSecretsPath({ XDG_CONFIG_HOME: join(tmpdir(), 'nope-xyz') })).toBeNull();
+    // Point both lookups at an empty dir: on Windows the default comes from APPDATA, which
+    // would otherwise fall back to the real user profile.
+    const empty = join(tmpdir(), 'nope-xyz');
+    expect(resolveSecretsPath({ XDG_CONFIG_HOME: empty, APPDATA: empty })).toBeNull();
   });
   it.skipIf(process.platform === 'win32')('warns about loose permissions on posix only', () => {
     const f = join(mkdtempSync(join(tmpdir(), 'sec-')), '.env');
