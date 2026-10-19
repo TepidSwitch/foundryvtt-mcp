@@ -104,7 +104,7 @@ export async function runInSandbox(code: string, opts: SandboxOptions): Promise<
     if (evaluated.error) {
       const err = vm.dump(evaluated.error);
       evaluated.error.dispose();
-      return finish({ ok: false, error: describe(err) });
+      return finish({ ok: false, error: describe(err, deadline, opts.timeoutMs) });
     }
     const promiseHandle: QuickJSHandle = evaluated.value;
     const settled = vm.resolvePromise(promiseHandle);
@@ -124,7 +124,7 @@ export async function runInSandbox(code: string, opts: SandboxOptions): Promise<
     if (outcome.error) {
       const err = vm.dump(outcome.error);
       outcome.error.dispose();
-      return finish({ ok: false, error: describe(err) });
+      return finish({ ok: false, error: describe(err, deadline, opts.timeoutMs) });
     }
     const dumped = vm.dump(outcome.value);
     outcome.value.dispose();
@@ -150,7 +150,13 @@ export async function runInSandbox(code: string, opts: SandboxOptions): Promise<
   }
 }
 
-function describe(err: unknown): string {
+function describe(err: unknown, deadline: number, timeoutMs: number): string {
+  if (
+    Date.now() >= deadline &&
+    String((err as { message?: string })?.message).includes('interrupted')
+  ) {
+    return `Script exceeded the ${timeoutMs / 1000}s time limit`;
+  }
   if (err && typeof err === 'object') {
     const e = err as { name?: string; message?: string };
     return `${e.name ?? 'Error'}: ${e.message ?? JSON.stringify(err)}`;

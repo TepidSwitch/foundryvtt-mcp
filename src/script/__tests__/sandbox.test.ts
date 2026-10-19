@@ -63,7 +63,7 @@ describe('sandbox', () => {
 
   it('stops an infinite loop', async () => {
     const r = await runInSandbox('while (true) {}', { ...base, timeoutMs: 300 });
-    expect(r.ok).toBe(false);
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('time limit') });
   });
 
   it('stops a never-resolving promise', async () => {
