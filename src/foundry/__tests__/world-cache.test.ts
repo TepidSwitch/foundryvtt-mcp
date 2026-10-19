@@ -116,6 +116,43 @@ describe('applyDocumentBroadcast — top-level documents', () => {
     expect(world.journal[0].folder).toBe('folder0000000000');
   });
 
+  it('merges a partial embedded array by _id instead of replacing it', () => {
+    const world = buildWorldData();
+    (world as unknown as { playlists: unknown[] }).playlists = [
+      {
+        _id: 'pppppppppppppppp',
+        name: 'Ambience',
+        sounds: [
+          { _id: 's1s1s1s1s1s1s1s1', name: 'Rain', playing: false },
+          { _id: 's2s2s2s2s2s2s2s2', name: 'Fire', playing: false },
+        ],
+      },
+    ];
+    applyDocumentBroadcast(world, {
+      type: 'Playlist',
+      action: 'update',
+      result: [{ _id: 'pppppppppppppppp', sounds: [{ _id: 's1s1s1s1s1s1s1s1', playing: true }] }],
+    });
+    const sounds = (world.playlists[0] as { sounds: Array<Record<string, unknown>> }).sounds;
+    expect(sounds).toHaveLength(2);
+    expect(sounds[0]).toMatchObject({ name: 'Rain', playing: true });
+    expect(sounds[1]).toMatchObject({ name: 'Fire', playing: false });
+  });
+
+  it('still replaces arrays whose entries are not id-keyed documents', () => {
+    const world = buildWorldData();
+    applyDocumentBroadcast(world, broadcast());
+    applyDocumentBroadcast(
+      world,
+      broadcast({ action: 'update', result: [{ _id: JOURNAL_ID, tags: ['a'] }] }),
+    );
+    applyDocumentBroadcast(
+      world,
+      broadcast({ action: 'update', result: [{ _id: JOURNAL_ID, tags: ['b', 'c'] }] }),
+    );
+    expect(world.journal[0].tags).toEqual(['b', 'c']);
+  });
+
   it('removes a deleted document by id', () => {
     const world = buildWorldData();
     applyDocumentBroadcast(world, broadcast());
