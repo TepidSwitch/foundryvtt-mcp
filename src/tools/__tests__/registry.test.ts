@@ -87,6 +87,7 @@ const ACTIONS: Record<string, string[]> = {
     'delete',
     'set_scene_music',
   ],
+  foundry_script: ['run'],
   foundry_canvas: ['list'],
   foundry_canvas_edit: [
     'add_walls',
@@ -186,6 +187,15 @@ describe('registry filtering', () => {
       'foundry_chat',
       'foundry_chat_edit',
     ]);
+  });
+
+  it('keeps foundry_script off unless the script toolset is named', () => {
+    expect(createToolRegistry({ writeEnabled: true }).has('foundry_script')).toBe(false);
+    const on = createToolRegistry({ writeEnabled: true, toolsets: ['script'] });
+    expect(on.getToolNames()).toEqual(['foundry_script']);
+    expect(
+      createToolRegistry({ writeEnabled: false, toolsets: ['script'] }).has('foundry_script'),
+    ).toBe(false);
   });
 
   it('keeps the low-level canvas tools off unless the canvas toolset is named', () => {

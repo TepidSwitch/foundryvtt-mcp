@@ -52,6 +52,12 @@ export const resourceDefinitions = [
     mimeType: 'application/json',
   },
   {
+    uri: 'foundry://script-api.d.ts',
+    name: 'Script API',
+    description: 'TypeScript declarations for the foundry_script sandbox API',
+    mimeType: 'text/plain',
+  },
+  {
     uri: 'foundry://system/diagnostics',
     name: 'System Diagnostics',
     description: 'System health and diagnostic information (requires REST API module)',

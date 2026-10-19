@@ -5,6 +5,7 @@
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { DiagnosticsClient } from '../../diagnostics/client.js';
 import type { FoundryClient } from '../../foundry/client.js';
+import { SCRIPT_API_DTS } from '../../script/api.js';
 import { logger } from '../../utils/logger.js';
 import { getTurnOrder } from './combat-order.js';
 import { withToolError } from './utils.js';
@@ -39,6 +40,9 @@ export async function handleReadResource(
 
       case 'foundry://combat':
         return await getCombatResource(foundryClient);
+
+      case 'foundry://script-api.d.ts':
+        return { contents: [{ uri, mimeType: 'text/plain', text: SCRIPT_API_DTS }] };
 
       case 'foundry://system/diagnostics':
         return await getSystemDiagnosticsResource(diagnosticsClient);

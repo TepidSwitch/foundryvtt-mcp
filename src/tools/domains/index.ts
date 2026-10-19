@@ -17,6 +17,7 @@ import { historyEditTool, historyTool } from './history.js';
 import { itemsEditTool, itemsTool } from './items.js';
 import { journalsEditTool, journalsTool } from './journals.js';
 import { scenesEditTool, scenesTool, tokensEditTool } from './scenes.js';
+import { scriptTool } from './script.js';
 import { worldTool } from './world.js';
 import { worldEditTool } from './world-edit.js';
 
@@ -51,4 +52,5 @@ export const ALL_DOMAIN_TOOLS: Tool[] = [
   historyTool,
   historyEditTool,
   diagnosticsTool,
+  scriptTool,
 ];
