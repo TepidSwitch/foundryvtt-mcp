@@ -94,6 +94,7 @@ hidden, and refused if called, unless `FOUNDRY_WRITE_ENABLED=true`.
 | chat | `foundry_chat`: read, roll | `foundry_chat_edit`: send, request_roll, draw_table |
 | world | `foundry_world`: summary, search, browse, users, refresh | `foundry_world_edit`: create_folder, move_to_folder |
 | canvas (off by default) | `foundry_canvas`: list | `foundry_canvas_edit`: add_walls, add_room, set_door, remove_walls, add_region, update_region, remove_region, add_tile, update_tile, remove_tile, add_drawing, update_drawing, remove_drawing |
+| script (off by default) | none | `foundry_script`: run |
 | files | `foundry_files`: browse | `foundry_files_edit`: mkdir, upload |
 | generate | `foundry_generate`: npc, loot, map_status, rule | `foundry_generate_edit`: map, cancel_map (needs `COMFYUI_URL`) |
 | history | `foundry_history`: log | `foundry_history_edit`: undo |
@@ -197,3 +198,23 @@ available in this mode.
 | `JOIN.ErrorUserDoesNotExist` | Wrong `FOUNDRY_USERNAME` (display name, case-sensitive) or the v14 `userId` patch missing |
 | Generic HTTP 400 on `/join` | Missing `Origin` header (v14 CSRF check); the branch sends it |
 | Desktop shows the server disconnected | Read `mcp-server-foundryvtt-mcp.log` in Desktop's log folder; fully quit and relaunch |
+
+### Script toolset (code mode)
+
+Name `script` in `FOUNDRY_TOOLSETS` (and set `FOUNDRY_WRITE_ENABLED=true`) to add
+`foundry_script`. The agent sends JavaScript that runs in a QuickJS (WASM) sandbox with no
+network, files, `process` or `require`; its only way out is the `foundry` object
+(`list`, `get`, `create`, `update`, `delete`, `chat`). The full declarations are the MCP
+resource `foundry://script-api.d.ts`.
+
+- Limits per run: 150 API calls, 30 deleted documents, 60 seconds, 64 MB, 20,000
+  characters of output.
+- Every write in a run shares one batch id, so one `foundry_history_edit undo` reverts the
+  whole script.
+- The first run of any script (by hash, per server process) is a dry run: writes are
+  logged but not sent, and created documents get placeholder ids, so a script that reads
+  back what it just created sees nothing. Repeat the same code with `dry_run: false` to
+  apply it. `FOUNDRY_DRY_RUN=true` makes every run dry.
+- `foundry.list` and `foundry.get` read the cached world (actors, items, scenes,
+  journals, macros, playlists, tables, cards, folders, combats), not compendiums or files.
+- Scripts cannot write `User` or `Setting` documents.
