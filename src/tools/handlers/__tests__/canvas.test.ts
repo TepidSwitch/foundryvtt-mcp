@@ -177,7 +177,7 @@ describe('walls', () => {
       mock,
     );
     expect(createDocuments).toHaveBeenCalledTimes(1);
-    expect((createDocuments.mock.calls[0]?.[1] as unknown[]).length).toBe(6);
+    expect((createDocuments.mock.calls[0]?.[1] as unknown[] | undefined)?.length).toBe(6);
     expect(() =>
       roomWalls({ x: 0, y: 0, width: 4, height: 3 }, { side: 'north', at: 3.5, width: 1 }),
     ).toThrow(/does not fit/);
@@ -406,7 +406,8 @@ describe('tiles and drawings', () => {
       mock,
     );
     expect(
-      (createDocuments.mock.calls.at(-1)?.[1] as Array<Record<string, unknown>>)[0]?.shape,
+      (createDocuments.mock.calls.at(-1)?.[1] as Array<Record<string, unknown>> | undefined)?.[0]
+        ?.shape,
     ).toEqual({
       type: 'p',
       width: 200,
@@ -427,7 +428,7 @@ describe('tiles and drawings', () => {
       mock,
     );
     expect(
-      (createDocuments.mock.calls.at(-1)?.[1] as Array<Record<string, unknown>>)[0],
+      (createDocuments.mock.calls.at(-1)?.[1] as Array<Record<string, unknown>> | undefined)?.[0],
     ).toMatchObject({
       shape: { type: 'r', width: 400, height: 100 },
       fillType: 0,
