@@ -7,14 +7,16 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that i
 
 ## Features
 
-- **Dice Rolling** — standard RPG notation with any formula
-- **Data Querying** — search and inspect actors, items, scenes, journals
-- **Game State** — combat tracking, chat messages, user presence
-- **Content Generation** — NPCs, loot tables, rule lookups
-- **World Search** — full-text search across all game entities
-- **Live Connection** — Socket.IO loads complete world state on connect
-- **MCP Resources** — `foundry://` URIs for direct data access
+- **One tool per domain** — `foundry_actors`, `foundry_scenes`, `foundry_journals`, ... each with an `action` field, plus an `_edit` twin for writes
+- **Full world editing** — actors, items, effects, scenes, tokens, combat, journals, audio, chat, folders, files (needs `FOUNDRY_WRITE_ENABLED=true`)
+- **Safe writes** — audit log, undo (whole batches), dry-run mode
+- **Canvas editing** (opt-in) — walls, doors, regions, tiles, drawings
+- **Code mode** (opt-in) — sandboxed JavaScript for bulk edits, one undo for the whole run
+- **AI map generation** (opt-in) — through your own ComfyUI server
+- **Live connection** — Socket.IO loads the complete world state on connect
 - **Diagnostics** — optional server health monitoring (requires REST API module)
+
+See [docs/guides/fork-setup.md](docs/guides/fork-setup.md) for the full tool table, every setting and Windows notes.
 
 ## Quick Start
 
@@ -121,6 +123,9 @@ To configure manually, see the [Configuration Guide](docs/guides/configuration.m
 | `FOUNDRY_USER_ID` | No | Bypass username-to-ID resolution |
 | `FOUNDRY_API_KEY` | No | REST API module key (enables diagnostics tools) |
 | `FOUNDRY_WRITE_ENABLED` | No | Enable game-state mutations — `true` required for the write tools (default: `false`) |
+| `FOUNDRY_TOOLSETS` | No | Comma-separated toolsets to expose (default: all except `canvas` and `script`) |
+| `FOUNDRY_DRY_RUN` | No | `true` logs writes without sending them |
+| `COMFYUI_URL` | No | ComfyUI server URL; enables AI map generation |
 | `LOG_LEVEL` | No | `debug`, `info`, `warn`, or `error` (default: `info`) |
 | `FOUNDRY_TIMEOUT` | No | Request timeout in ms (default: `10000`) |
 
@@ -129,6 +134,8 @@ To configure manually, see the [Configuration Guide](docs/guides/configuration.m
 Ask your AI assistant things like:
 
 - "Roll 1d20+5 for an attack roll"
+- "Put a goblin ambush token group on the active scene"
+- "Rename every marker token to match its actor"
 - "Show me all the NPCs in this scene"
 - "What's the current combat initiative order?"
 - "Search the world for anything related to dragons"
@@ -136,82 +143,36 @@ Ask your AI assistant things like:
 
 ## Available Tools
 
-### Data Access
+Tools are named `foundry_<domain>` (read) and `foundry_<domain>_edit` (write); pick the operation with `action`. `_edit` tools are hidden unless `FOUNDRY_WRITE_ENABLED=true`.
 
-- `search_actors` — find characters, NPCs, monsters
-- `get_actor_details` — detailed character information
-- `search_items` — find equipment, spells, consumables
-- `get_scene_info` — current scene details
-- `search_journals` — search notes and handouts
-- `get_journal` — retrieve a specific journal entry
-- `get_users` — list users, roles, and live online status
-- `get_combat_state` — combat state and initiative order
-- `get_chat_messages` — recent chat history
+| Domain | Read | Write |
+|--------|------|-------|
+| actors | `foundry_actors`: search, get, items, party, find_in_party, compare | `foundry_actors_edit`: update, set_ownership, import |
+| items | `foundry_items`: search | `foundry_items_edit`: create, update, delete, use, add_to_actor, update_on_actor, remove_from_actor |
+| effects | | `foundry_effects_edit` |
+| scenes, tokens | `foundry_scenes`: search, get, suggest, image | `foundry_scenes_edit`, `foundry_tokens_edit` |
+| combat | `foundry_combat`: state | `foundry_combat_edit`: start, next_turn, set_initiative, end |
+| journals | `foundry_journals`: search, get | `foundry_journals_edit` |
+| compendium | `foundry_compendium`: search, get, packs, roll_table | |
+| audio | `foundry_audio`: list | `foundry_audio_edit` |
+| chat | `foundry_chat`: read, roll | `foundry_chat_edit`: send, request_roll, draw_table |
+| world | `foundry_world`: summary, search, browse, users, refresh | `foundry_world_edit`: create_folder, move_to_folder |
+| files | `foundry_files`: browse | `foundry_files_edit`: mkdir, upload |
+| generate | `foundry_generate`: npc, loot, rule, map_status | `foundry_generate_edit`: map, cancel_map (needs `COMFYUI_URL`) |
+| history | `foundry_history`: log | `foundry_history_edit`: undo |
+| diagnostics | `foundry_diagnostics`: health, system, logs, search_logs, diagnose | |
+| canvas (opt-in) | `foundry_canvas`: list | `foundry_canvas_edit`: walls, regions, tiles, drawings |
+| script (opt-in) | | `foundry_script`: run |
 
-### Write Operations (require `FOUNDRY_WRITE_ENABLED=true`)
-
-Game-state mutations are **disabled by default**. They use the Socket.IO
-`modifyDocument` protocol over an authenticated session, and the connected user
-needs GM/owner permission. Set `FOUNDRY_WRITE_ENABLED=true` to enable them.
-
-- `start_combat` — begin a new encounter, seeding combatants from tokens (does
-  not check for an existing combat — calling it during an active one creates a
-  second encounter)
-- `next_turn` — advance the active combat to the next turn (wraps to the next round)
-- `end_combat` — end (delete) the active combat encounter
-- `set_initiative` — set a combatant's initiative in the active combat, moving the
-  turn marker with the acting combatant if the reorder shifts them
-- `move_token` — move a token to new x/y coordinates on its scene
-- `apply_status_effect` — apply or remove a status condition (e.g. prone, stunned) on a token's actor
-- `update_actor_attributes` — patch an actor's `system` attributes (HP, currency, spell slots, …)
-- `create_actor_item` — add an inline item to an actor
-- `update_actor_item` — apply a JSON merge patch to an actor's item
-- `delete_actor_item` — remove an item from an actor
-- `create_journal_entry` — create a journal entry with one or more text pages
-  (GM-only by default; pass `visibility` to let players read it)
-
-### World
-
-- `search_world` — full-text search across all game entities
-- `get_world_summary` — overview of the current world state
-- `refresh_world_data` — reload world data from FoundryVTT; needed after a dropped
-  connection, whose missed updates are never replayed into the cache
-
-### Game Mechanics
-
-- `roll_dice` — roll dice; dice terms (`NdS`) and whole numbers joined by `+`/`-`, with
-  unsupported notation (`4d6kh3`, `1d20r1`, `*`) rejected rather than dropped.
-  Parentheses are the one transport difference: FoundryVTT evaluates them when
-  `FOUNDRY_API_KEY` is set, the local roller rejects them otherwise
-- `lookup_rule` — **stub**: returns a templated placeholder, consults no rules source
-
-### Content Generation
-
-- `generate_npc` — generate NPC text (not written to the world)
-- `generate_loot` — generate treasure text for a level (not written to the world)
-
-### Diagnostics (requires REST API module)
-
-- `get_recent_logs` — retrieve filtered FoundryVTT logs
-- `search_logs` — search logs by pattern, listing the matching entries
-- `get_system_health` — server health status with versions, user/module counts, memory
-  and log error counts (no CPU or disk metrics)
-- `diagnose_errors` — **stub**: returns a fixed "no errors detected" summary
-- `get_health_status` — comprehensive health diagnostics; flags the world snapshot when
-  the cache has stopped following live changes
+Action lists for the opt-in and smaller tools are in [docs/guides/fork-setup.md](docs/guides/fork-setup.md#tools).
 
 ## Available Resources
 
-- `foundry://actors` — all actors in the world
-- `foundry://items` — all items in the world
-- `foundry://scenes` — all scenes
-- `foundry://scenes/current` — current active scene
-- `foundry://journals` — all journal entries
-- `foundry://users` — online users
-- `foundry://combat` — active combat state; `combatants` are in initiative order, so
-  `combat.turn` indexes them directly
+- `foundry://actors`, `foundry://items`, `foundry://scenes`, `foundry://scenes/current`, `foundry://journals`, `foundry://users`
+- `foundry://combat` — active combat; `combatants` are in initiative order, so `combat.turn` indexes them directly
 - `foundry://world/settings` — world and campaign settings
-- `foundry://system/diagnostics` — system diagnostics (requires REST API module)
+- `foundry://script-api.d.ts` — declarations for the `foundry_script` sandbox API
+- `foundry://system/diagnostics` — requires REST API module
 
 ## Troubleshooting
 
