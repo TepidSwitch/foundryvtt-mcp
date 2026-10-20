@@ -255,25 +255,47 @@ export async function handleGetCompendiumDocument(
 // get_roll_table
 // ---------------------------------------------------------------------------
 
+/**
+ * Rolls a plain dice formula locally: sums of `NdM`, `dM` and constants joined
+ * by + or - (e.g. `1d20`, `d100`, `2d6+3`, `1d8+1d6-2`). Returns null for anything
+ * else (keep/drop, exploding, pools, functions, references).
+ */
 export function rollFormula(formula: string): { total: number; detail: string } | null {
-  const m = formula.replace(/\s+/g, '').match(/^(\d*)d(\d+)([+-]\d+)?$/i);
-  if (!m) {
+  const clean = formula.replace(/\s+/g, '');
+  if (!/^[+-]?(\d*d\d+|\d+)([+-](\d*d\d+|\d+))*$/i.test(clean)) {
     return null;
   }
-  const n = m[1] ? Number(m[1]) : 1;
-  const sides = Number(m[2]);
-  const mod = m[3] ? Number(m[3]) : 0;
-  if (n < 1 || n > 100 || sides < 2) {
+  const terms = clean.match(/[+-]?(\d*d\d+|\d+)/gi) ?? [];
+  let total = 0;
+  let dice = 0;
+  const parts: string[] = [];
+  for (const term of terms) {
+    const sign = term.startsWith('-') ? -1 : 1;
+    const body = term.replace(/^[+-]/, '');
+    const m = body.match(/^(\d*)d(\d+)$/i);
+    if (!m) {
+      total += sign * Number(body);
+      parts.push(`${sign < 0 ? '-' : '+'}${body}`);
+      continue;
+    }
+    const n = m[1] ? Number(m[1]) : 1;
+    const sides = Number(m[2]);
+    dice += n;
+    if (n < 1 || sides < 2 || dice > 100) {
+      return null;
+    }
+    let sum = 0;
+    for (let i = 0; i < n; i++) {
+      sum += 1 + Math.floor(Math.random() * sides);
+    }
+    total += sign * sum;
+    parts.push(`${sign < 0 ? '-' : '+'}${sum}`);
+  }
+  if (dice === 0) {
     return null;
   }
-  let sum = 0;
-  for (let i = 0; i < n; i++) {
-    sum += 1 + Math.floor(Math.random() * sides);
-  }
-  return {
-    total: sum + mod,
-    detail: `${formula} = ${sum}${mod ? (mod > 0 ? `+${mod}` : `${mod}`) : ''}`,
-  };
+  const rolls = parts.join('').replace(/^\+/, '');
+  return { total, detail: `${clean} = ${rolls}` };
 }
 
 export async function handleGetRollTable(
