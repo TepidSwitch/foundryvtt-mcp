@@ -42,7 +42,15 @@ const EXPECTED_SURFACE: Array<[string, boolean, boolean]> = [
 
 const ACTIONS: Record<string, string[]> = {
   foundry_actors: ['search', 'get', 'items', 'party', 'find_in_party', 'compare'],
-  foundry_actors_edit: ['update', 'set_ownership', 'import'],
+  foundry_actors_edit: [
+    'update',
+    'set_ownership',
+    'import',
+    'request_rest',
+    'heal',
+    'damage',
+    'set_temp_hp',
+  ],
   foundry_items: ['search'],
   foundry_items_edit: [
     'create',

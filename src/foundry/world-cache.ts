@@ -71,6 +71,42 @@ const EMBEDDED_COLLECTIONS: Record<string, Record<string, string>> = {
   ActorDelta: { Item: 'items', ActiveEffect: 'effects' },
 };
 
+/** Turns `{"a.b": 1}` into `{a: {b: 1}}`; nested values are expanded too. */
+export function expandPaths(obj: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    const parts = key.split('.');
+    let cur = out;
+    for (const part of parts.slice(0, -1)) {
+      const next = cur[part];
+      if (isRecord(next)) {
+        cur = next;
+      } else {
+        const created: Record<string, unknown> = {};
+        cur[part] = created;
+        cur = created;
+      }
+    }
+    const last = parts[parts.length - 1] as string;
+    const expanded = isRecord(value) ? expandPaths(value) : value;
+    const existing = cur[last];
+    cur[last] =
+      isRecord(existing) && isRecord(expanded) ? deepMergeInto(existing, expanded) : expanded;
+  }
+  return out;
+}
+
+function deepMergeInto(
+  target: Record<string, unknown>,
+  src: Record<string, unknown>,
+): Record<string, unknown> {
+  for (const [k, v] of Object.entries(src)) {
+    const t = target[k];
+    target[k] = isRecord(t) && isRecord(v) ? deepMergeInto(t, v) : v;
+  }
+  return target;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -306,6 +342,33 @@ export function applyDocumentBroadcast(
   const { type, action, result, parentUuid } = broadcast;
   if (result.length === 0) {
     return false;
+  }
+
+  // An unlinked token's ActorDelta is embedded in the token itself:
+  // parent `Scene.<sid>.Token.<tid>`, merged into `token.delta`.
+  const deltaParent = /^Scene\.([^.]+)\.Token\.([^.]+)$/.exec(parentUuid ?? '');
+  if (type === 'ActorDelta' && deltaParent) {
+    if (action !== 'update') {
+      return false;
+    }
+    const scene = worldData.scenes.find((sc) => sc._id === deltaParent[1]);
+    const token = (
+      scene as unknown as { tokens?: Array<Record<string, unknown>> } | undefined
+    )?.tokens?.find((t) => t._id === deltaParent[2]);
+    if (!token) {
+      return false;
+    }
+    let delta = isRecord(token.delta) ? token.delta : null;
+    if (!delta) {
+      delta = { _id: deltaParent[2] };
+      token.delta = delta;
+    }
+    for (const change of result) {
+      if (isRecord(change)) {
+        deepMergeInto(delta, expandPaths(change));
+      }
+    }
+    return true;
   }
 
   if (parentUuid) {

@@ -10,6 +10,12 @@ import { handleGetActorItems, handleGetPartyOverview } from '../handlers/charact
 import { handleImportFromCompendium } from '../handlers/import-place.js';
 import { handleSetActorOwnership } from '../handlers/ownership.js';
 import { handleCompareParty, handleFindInParty } from '../handlers/party.js';
+import {
+  handleDamage,
+  handleHeal,
+  handleRequestRest,
+  handleSetTempHp,
+} from '../handlers/rest-healing.js';
 
 const scope = z
   .enum(['party', 'all'])
@@ -149,6 +155,57 @@ export const actorsEditTool = new DomainTool({
         new_name: z.string().optional().describe('Name for the imported copy'),
       }),
       run: (a, ctx) => handleImportFromCompendium(a, ctx.foundryClient),
+    }),
+    request_rest: action({
+      description:
+        "Post dnd5e's rest request card in chat: each listed character's player presses the button to take the rest. type short (1 hour) or long (8 hours, new day). actors defaults to the party (every user-assigned character). new_day overrides the type default (long: true). Does not rest anyone itself.",
+      schema: z.object({
+        type: z.enum(['short', 'long']).describe('Rest type'),
+        actors: z
+          .array(z.string())
+          .optional()
+          .describe('Actor ids, names or player names (default: the party)'),
+        new_day: z.boolean().optional().describe('Count as a new day (default: true for long)'),
+      }),
+      run: (a, ctx) => handleRequestRest(a, ctx.foundryClient),
+    }),
+    heal: action({
+      description:
+        'Restore hit points, clamped at max HP (temp HP untouched). target is an actor id/name/player name or a token id (unlinked tokens are healed on their own copy; sceneId narrows the token search). announce=true also posts a chat line. Returns HP before and after.',
+      schema: z.object({
+        target: z.string().describe('Actor id/name/player name, or token id'),
+        amount: z.number().int().min(1).describe('Hit points to restore'),
+        sceneId: z.string().optional().describe('Scene id, to find a token'),
+        announce: z.boolean().optional().describe('Post a short chat line'),
+      }),
+      run: (a, ctx) => handleHeal(a, ctx.foundryClient),
+    }),
+    damage: action({
+      description:
+        'Deal damage: temp HP absorb first, then HP, never below 0. The raw amount is applied: type is informational only and resistances, vulnerabilities and immunities are NOT calculated. target is an actor id/name/player name or a token id (unlinked tokens are hurt on their own copy). announce=true also posts a chat line.',
+      schema: z.object({
+        target: z.string().describe('Actor id/name/player name, or token id'),
+        amount: z
+          .number()
+          .int()
+          .min(1)
+          .describe('Damage to apply (already adjusted for resistance)'),
+        type: z.string().optional().describe('Damage type, shown in the output only'),
+        sceneId: z.string().optional().describe('Scene id, to find a token'),
+        announce: z.boolean().optional().describe('Post a short chat line'),
+      }),
+      run: (a, ctx) => handleDamage(a, ctx.foundryClient),
+    }),
+    set_temp_hp: action({
+      description:
+        'Grant temporary HP. Temp HP do not stack: the higher of current and new is kept unless force=true, which replaces it (also to lower or clear it with 0). target is an actor id/name/player name or a token id.',
+      schema: z.object({
+        target: z.string().describe('Actor id/name/player name, or token id'),
+        amount: z.number().int().min(0).describe('Temp HP'),
+        force: z.boolean().optional().describe('Replace even if lower than the current temp HP'),
+        sceneId: z.string().optional().describe('Scene id, to find a token'),
+      }),
+      run: (a, ctx) => handleSetTempHp(a, ctx.foundryClient),
     }),
   },
 });

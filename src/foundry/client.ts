@@ -50,6 +50,7 @@ import { VISIBILITY_LEVELS } from './types.js';
 import {
   applyDocumentBroadcast,
   applyUserActivity,
+  expandPaths,
   findCachedDocuments,
   parseDocumentBroadcast,
   parseUserActivity,
@@ -931,6 +932,56 @@ export class FoundryClient {
       updatedAttributes[path] = fromServer !== undefined ? fromServer : value;
     }
 
+    return { success: true, updatedAttributes };
+  }
+
+  /**
+   * Like {@link updateActorAttribute} for the synthetic actor of an UNLINKED
+   * token. The change is stored on the token's `ActorDelta` (embedded in the
+   * token), so the write is an `ActorDelta` update with
+   * `parentUuid: Scene.<sid>.Token.<tid>` and `_id` equal to the token id.
+   * Validation uses the base actor's system merged with the delta's.
+   */
+  async updateTokenActorAttribute(
+    sceneId: string,
+    tokenId: string,
+    patch: AttributePatch,
+  ): Promise<ActorAttributeUpdateResult> {
+    this.assertWriteable();
+    if (!FOUNDRY_ID_PATTERN.test(sceneId) || !FOUNDRY_ID_PATTERN.test(tokenId)) {
+      throw new Error(`Invalid scene or token id: ${sceneId} / ${tokenId}`);
+    }
+    if (!isRecord(patch) || Object.keys(patch).length === 0) {
+      throw new Error('patch is required and must contain at least one attribute path');
+    }
+    const located = this.findToken(tokenId, sceneId);
+    if (!located) {
+      throw new Error(`Token not found: ${tokenId} on scene ${sceneId}`);
+    }
+    const token = located.token;
+    const baseId = typeof token.actorId === 'string' ? token.actorId : '';
+    const deltaSystem = isRecord(token.delta) ? systemOf(token.delta) : undefined;
+    const rawSystem = mergeRecords(systemOf(this.getRawActor(baseId)) ?? {}, deltaSystem ?? {});
+    validateAttributePatch(patch, { _id: baseId, name: '', type: '' }, rawSystem);
+
+    // Nested, not dot-path keys: Foundry accepts dot keys on an ActorDelta
+    // update but persists nothing (verified live on 14.368).
+    const update: Record<string, unknown> = {
+      _id: tokenId,
+      ...expandPaths(Object.fromEntries(Object.entries(patch).map(([p, v]) => [`system.${p}`, v]))),
+    };
+    const result = await this.modifyDocument('ActorDelta', 'update', {
+      updates: [update],
+      parentUuid: `Scene.${sceneId}.Token.${tokenId}`,
+      diff: true,
+      recursive: true,
+    });
+    const returned = isRecord(result[0]) ? (result[0] as Record<string, unknown>) : undefined;
+    const updatedAttributes: Record<string, unknown> = {};
+    for (const [path, value] of Object.entries(patch)) {
+      const fromServer = returned ? getDotPath(returned, `system.${path}`) : undefined;
+      updatedAttributes[path] = fromServer !== undefined ? fromServer : value;
+    }
     return { success: true, updatedAttributes };
   }
 
@@ -2576,6 +2627,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * Returns undefined when no system object is present (e.g. the mapped
  * {@link FoundryActor} produced by the socket world-cache path).
  */
+/** Deep-merges plain objects (delta over base); arrays and scalars are replaced. */
+export function mergeRecords(
+  base: Record<string, unknown>,
+  over: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...base };
+  for (const [k, v] of Object.entries(over)) {
+    const b = out[k];
+    out[k] = isRecord(b) && isRecord(v) ? mergeRecords(b, v) : v;
+  }
+  return out;
+}
+
 function systemOf(obj: unknown): Record<string, unknown> | undefined {
   if (isRecord(obj) && isRecord(obj.system)) {
     return obj.system;

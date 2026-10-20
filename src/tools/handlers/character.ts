@@ -294,8 +294,8 @@ export function formatSheet(
     if (dice.length > 0) {
       lines.push(`**Hit dice** ${dice.join(', ')}`);
     }
-    if (hp.value === 0) {
-      const death = at(sys, 'attributes', 'death');
+    const death = at(sys, 'attributes', 'death');
+    if (hp.value === 0 || num(at(death, 'success')) > 0 || num(at(death, 'failure')) > 0) {
       lines.push(
         `**Death saves** ${num(at(death, 'success'))} successes · ${num(at(death, 'failure'))} failures`,
       );
