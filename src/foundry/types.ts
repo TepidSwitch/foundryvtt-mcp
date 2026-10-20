@@ -481,6 +481,9 @@ export interface DiceRoll {
   timestamp: string;
 }
 
+/** Foundry user role levels (CONST.USER_ROLES). Each level includes the ones below it. */
+export const USER_ROLE = { PLAYER: 1, TRUSTED: 2, ASSISTANT: 3, GAMEMASTER: 4 } as const;
+
 export interface FoundryUser {
   _id: string;
   name: string;

@@ -6,6 +6,7 @@
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { DiagnosticsClient } from '../../diagnostics/client.js';
+import { assessRole } from '../../diagnostics/role.js';
 import type { LogEntry } from '../../diagnostics/types.js';
 import { LogEntrySchema } from '../../diagnostics/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
@@ -406,6 +407,14 @@ export async function handleGetHealthStatus(
       worldLines.unshift(STALE_WORLD_DATA_NOTICE);
     }
 
+    const role = assessRole(foundryClient.getLoggedInRole(), foundryClient.isWriteEnabled());
+    const roleSection = role
+      ? `\n\n**Login Role:**\n${[
+          `- **Role:** ${role.roleName}`,
+          ...role.notes.map((n) => `${n.level === 'warn' ? '⚠️' : 'ℹ️'} ${n.text}`),
+        ].join('\n')}`
+      : '';
+
     let healthSection = 'ℹ️ Not available';
     if (systemHealth) {
       const healthLines = [
@@ -434,6 +443,7 @@ export async function handleGetHealthStatus(
 
 **FoundryVTT Connection:**
 ${connectionLine(foundryClient)}
+${roleSection}
 
 **World Information:**
 ${worldLines.join('\n')}
