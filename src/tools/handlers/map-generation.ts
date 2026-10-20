@@ -9,6 +9,7 @@ import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { MapSize } from '../../generate/comfyui.js';
 import type { MapJob } from '../../generate/map-jobs.js';
 import type { ToolContext } from '../base.js';
+import { ensureFolder } from './folders.js';
 import { resolveFolder } from './import-place.js';
 import { snapshotOf } from './refs.js';
 import { withToolError } from './utils.js';
@@ -70,7 +71,9 @@ export async function handleGenerateMap(
     }
     const folderId = args.folder
       ? resolveFolder(snapshotOf(ctx.foundryClient), args.folder, 'Scene')
-      : undefined;
+      : ctx.sceneFolder
+        ? await ensureFolder(ctx.foundryClient, ctx.sceneFolder, 'Scene')
+        : undefined;
     const job = await ctx.maps.start({
       prompt: args.prompt,
       sceneName: args.scene_name,

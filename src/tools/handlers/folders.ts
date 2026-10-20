@@ -51,6 +51,31 @@ function findFolder(snapshot: WorldData, ref: string, type: string): Rec {
   );
 }
 
+/**
+ * Id of the top-level or nested world folder of `type` named `name`
+ * (case-insensitive), creating it when missing. Shared by handleCreateFolder
+ * callers that need "find or make" semantics, e.g. map generation.
+ */
+export async function ensureFolder(
+  foundryClient: FoundryClient,
+  name: string,
+  type: string,
+): Promise<string> {
+  const snapshot = snapshotOf(foundryClient);
+  const existing = (snapshot.folders as Rec[]).filter(
+    (f) => str(f.type) === type && str(f.name).toLowerCase() === name.toLowerCase(),
+  );
+  if (existing[0]) {
+    return str(existing[0]._id);
+  }
+  const [created] = await foundryClient.createDocuments('Folder', [{ name, type }]);
+  const id = str(created?._id);
+  if (!id) {
+    throw new McpError(ErrorCode.InternalError, `Could not create the ${type} folder "${name}"`);
+  }
+  return id;
+}
+
 export async function handleCreateFolder(
   args: { name: string; type: string; parent?: string; color?: string; description?: string },
   foundryClient: FoundryClient,

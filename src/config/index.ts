@@ -73,6 +73,8 @@ const ConfigSchema = z.object({
     // unless COMFYUI_AUTH_HEADER names another header, which gets the raw key.
     apiKey: z.string().optional(),
     authHeader: z.string().optional(),
+    // Scene folder for generated maps (created when missing).
+    sceneFolder: z.string().default('Generated Maps'),
   }),
 
   cache: z.object({
@@ -145,6 +147,7 @@ function loadConfig(): Config {
       vae: process.env.COMFYUI_VAE || undefined,
       apiKey: process.env.COMFYUI_API_KEY || undefined,
       authHeader: process.env.COMFYUI_AUTH_HEADER || undefined,
+      sceneFolder: process.env.COMFYUI_SCENE_FOLDER || undefined,
     },
 
     cache: {

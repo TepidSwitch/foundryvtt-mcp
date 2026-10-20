@@ -21,6 +21,8 @@ export interface ToolContext {
   /** Present only when COMFYUI_URL is set. */
   comfyui?: ComfyUIClient | undefined;
   maps?: MapJobManager | undefined;
+  /** Default Scene folder name for generated maps (COMFYUI_SCENE_FOLDER). */
+  sceneFolder?: string | undefined;
 }
 
 /**

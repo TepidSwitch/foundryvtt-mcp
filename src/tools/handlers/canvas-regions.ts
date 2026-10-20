@@ -120,6 +120,59 @@ export function buildShape(g: Geometry, s: RegionShapeSpec): Rec {
   }
 }
 
+/**
+ * Bounding box, in grid squares from the map's top-left, of a region's first
+ * shape (rotation ignored). Throws when the region has no usable shape.
+ */
+export function regionBounds(
+  g: Geometry,
+  region: Rec,
+): { x: number; y: number; width: number; height: number } {
+  const first = (Array.isArray(region.shapes) ? region.shapes : [])[0] as Rec | undefined;
+  if (!first) {
+    throw new McpError(ErrorCode.InvalidParams, `Region "${str(region.name)}" has no shapes`);
+  }
+  const x = num(first.x);
+  const y = num(first.y);
+  let box: [number, number, number, number]; // minX, minY, maxX, maxY in pixels
+  switch (str(first.type)) {
+    case 'rectangle':
+      box = [x, y, x + num(first.width), y + num(first.height)];
+      break;
+    case 'circle':
+    case 'cone':
+    case 'ring': {
+      const r = num(first.radius);
+      box = [x - r, y - r, x + r, y + r];
+      break;
+    }
+    case 'ellipse': {
+      const rx = num(first.radiusX);
+      const ry = num(first.radiusY);
+      box = [x - rx, y - ry, x + rx, y + ry];
+      break;
+    }
+    case 'polygon': {
+      const pts = (Array.isArray(first.points) ? first.points : []).map(Number);
+      const xs = pts.filter((_, i) => i % 2 === 0);
+      const ys = pts.filter((_, i) => i % 2 === 1);
+      if (xs.length === 0) {
+        throw new McpError(ErrorCode.InvalidParams, `Region "${str(region.name)}" has no points`);
+      }
+      box = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+      break;
+    }
+    default:
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `Region "${str(region.name)}" has an unsupported first shape (${str(first.type)})`,
+      );
+  }
+  const [x1, y1] = squares(g, box[0], box[1]);
+  const [x2, y2] = squares(g, box[2], box[3]);
+  return { x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
+}
+
 export interface RegionFields {
   color?: string | undefined;
   hidden?: boolean | undefined;
