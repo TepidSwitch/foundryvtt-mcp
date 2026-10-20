@@ -179,4 +179,31 @@ describe('Config', () => {
       expect(config.cache.enabled).toBe(false);
     });
   });
+
+  describe('ComfyUI auth', () => {
+    it('reads COMFYUI_API_KEY and COMFYUI_AUTH_HEADER', async () => {
+      process.env = {
+        FOUNDRY_URL: 'http://localhost:30000',
+        COMFYUI_URL: 'http://gpu:8188',
+        COMFYUI_API_KEY: 'secret-key-123',
+        COMFYUI_AUTH_HEADER: 'X-Proxy-Key',
+      };
+
+      const { config, resetConfig } = await import('../index.js');
+      resetConfig();
+
+      expect(config.comfyui.apiKey).toBe('secret-key-123');
+      expect(config.comfyui.authHeader).toBe('X-Proxy-Key');
+    });
+
+    it('leaves the key and header undefined when unset or empty', async () => {
+      process.env = { FOUNDRY_URL: 'http://localhost:30000', COMFYUI_API_KEY: '' };
+
+      const { config, resetConfig } = await import('../index.js');
+      resetConfig();
+
+      expect(config.comfyui.apiKey).toBeUndefined();
+      expect(config.comfyui.authHeader).toBeUndefined();
+    });
+  });
 });

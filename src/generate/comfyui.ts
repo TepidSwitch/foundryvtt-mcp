@@ -22,7 +22,14 @@ export interface ComfyUIOptions {
   baseUrl: string;
   checkpoint: string;
   vae: string;
-  /** Replaceable in tests. */
+  /** Optional key for a hosted or proxied ComfyUI. Never logged. */
+  apiKey?: string | undefined;
+  /**
+   * Header that carries the key. Unset or `Authorization` sends `Bearer <key>`;
+   * any other name (e.g. a proxy header) receives the raw key.
+   */
+  authHeader?: string | undefined;
+  /** Replaceable in tests. When injected, the caller owns request headers. */
   http?: HttpLike;
 }
 
@@ -100,16 +107,27 @@ export function buildWorkflow(
   };
 }
 
-function describeError(error: unknown): string {
+function describeError(error: unknown, secret?: string): string {
+  const redact = (text: string) => (secret ? text.split(secret).join('[redacted]') : text);
   if (axios.isAxiosError(error)) {
     if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND' || error.code === 'ETIMEDOUT') {
       return `cannot reach ComfyUI (${error.code})`;
     }
     const detail = error.response?.data;
     const text = typeof detail === 'string' ? detail : detail ? JSON.stringify(detail) : '';
-    return `${error.message}${text ? `: ${text.slice(0, 300)}` : ''}`;
+    return redact(`${error.message}${text ? `: ${text.slice(0, 300)}` : ''}`);
   }
-  return error instanceof Error ? error.message : String(error);
+  return redact(error instanceof Error ? error.message : String(error));
+}
+
+/** Builds the auth header for a hosted ComfyUI, or nothing when no key is set. */
+export function buildAuthHeaders(apiKey?: string, authHeader?: string): Record<string, string> {
+  if (!apiKey) {
+    return {};
+  }
+  const name = authHeader?.trim() || 'Authorization';
+  const value = name.toLowerCase() === 'authorization' ? `Bearer ${apiKey}` : apiKey;
+  return { [name]: value };
 }
 
 export class ComfyUIClient {
@@ -119,7 +137,12 @@ export class ComfyUIClient {
 
   constructor(private readonly options: ComfyUIOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, '');
-    this.http = options.http ?? (axios.create({ baseURL: this.baseUrl }) as unknown as HttpLike);
+    this.http =
+      options.http ??
+      (axios.create({
+        baseURL: this.baseUrl,
+        headers: buildAuthHeaders(options.apiKey, options.authHeader),
+      }) as unknown as HttpLike);
   }
 
   async checkHealth(): Promise<ComfyUIHealth> {
@@ -138,7 +161,7 @@ export class ComfyUIClient {
         ...(gpu ? { gpu } : {}),
       };
     } catch (error) {
-      return { available: false, error: describeError(error) };
+      return { available: false, error: describeError(error, this.options.apiKey) };
     }
   }
 
@@ -155,7 +178,7 @@ export class ComfyUIClient {
       }
       return data.prompt_id;
     } catch (error) {
-      const message = describeError(error);
+      const message = describeError(error, this.options.apiKey);
       if (/ckpt_name|vae_name|not in \[/.test(message)) {
         throw new Error(
           `ComfyUI does not have the model this workflow needs (${this.options.checkpoint} / ${this.options.vae}). Install them, or set COMFYUI_CHECKPOINT / COMFYUI_VAE to names that exist. Details: ${message}`,

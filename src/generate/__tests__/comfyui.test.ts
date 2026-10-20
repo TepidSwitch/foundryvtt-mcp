@@ -1,5 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
-import { buildWorkflow, ComfyUIClient, type HttpLike } from '../comfyui.js';
+import axios, { type AxiosResponse, type InternalAxiosRequestConfig } from 'axios';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  buildAuthHeaders,
+  buildWorkflow,
+  ComfyUIClient,
+  type ComfyUIOptions,
+  type HttpLike,
+} from '../comfyui.js';
 
 const MODELS = { checkpoint: 'battle.safetensors', vae: 'vae.safetensors' };
 
@@ -161,5 +168,132 @@ describe('ComfyUIClient', () => {
     const health = await down.comfy.checkHealth();
     expect(health.available).toBe(false);
     expect(health.error).toContain('cannot reach ComfyUI');
+  });
+});
+
+describe('ComfyUI auth header', () => {
+  const KEY = 'secret-key-123';
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * Builds a real client whose axios instance is answered by a fake adapter, so the
+   * headers axios actually sends are what the test sees.
+   */
+  function hostedClient(options: Partial<ComfyUIOptions>) {
+    const sent: Array<{ method?: string; url?: string; headers: Record<string, unknown> }> = [];
+    const queue: { queue_running?: unknown[][]; queue_pending?: unknown[][] } = {
+      queue_pending: [[1, 'p1']],
+    };
+    const realCreate = axios.create.bind(axios);
+    vi.spyOn(axios, 'create').mockImplementation((cfg) =>
+      realCreate({
+        ...cfg,
+        adapter: async (config: InternalAxiosRequestConfig): Promise<AxiosResponse> => {
+          sent.push({
+            method: config.method,
+            url: config.url,
+            headers: { ...(config.headers.toJSON() as Record<string, unknown>) },
+          });
+          let data: unknown = {};
+          if (config.url === '/prompt') {
+            data = { prompt_id: 'p1' };
+          } else if (config.url === '/queue' && config.method === 'get') {
+            data = queue;
+          } else if (config.url?.startsWith('/view')) {
+            data = new ArrayBuffer(2);
+          }
+          return { data, status: 200, statusText: 'OK', headers: {}, config };
+        },
+      }),
+    );
+    const comfy = new ComfyUIClient({
+      baseUrl: 'http://gpu:8188',
+      ...MODELS,
+      ...options,
+    });
+    return { comfy, sent, queue };
+  }
+
+  it('builds Bearer for the default header and the raw key for a custom one', () => {
+    expect(buildAuthHeaders(KEY)).toEqual({ Authorization: `Bearer ${KEY}` });
+    expect(buildAuthHeaders(KEY, 'Authorization')).toEqual({ Authorization: `Bearer ${KEY}` });
+    expect(buildAuthHeaders(KEY, 'X-Proxy-Key')).toEqual({ 'X-Proxy-Key': KEY });
+    expect(buildAuthHeaders(undefined, 'X-Proxy-Key')).toEqual({});
+    expect(buildAuthHeaders('')).toEqual({});
+  });
+
+  it('sends Authorization: Bearer on every request type', async () => {
+    const { comfy, sent, queue } = hostedClient({ apiKey: KEY });
+    await comfy.checkHealth();
+    await comfy.submit({ prompt: 'cave', width: 512, height: 512 });
+    await comfy.getStatus('p1');
+    await comfy.download({ filename: 'a.png', subfolder: '', type: 'output' });
+    await comfy.cancel('p1'); // queued -> DELETE /queue
+    queue.queue_pending = [];
+    queue.queue_running = [[0, 'p1']];
+    await comfy.cancel('p1'); // running -> POST /interrupt
+
+    const urls = sent.map((r) => `${r.method} ${r.url}`);
+    expect(urls).toEqual(
+      expect.arrayContaining([
+        'get /system_stats',
+        'post /prompt',
+        'get /history/p1',
+        'get /queue',
+        'get /view',
+        'post /queue',
+        'post /interrupt',
+      ]),
+    );
+    for (const request of sent) {
+      expect(request.headers.Authorization).toBe(`Bearer ${KEY}`);
+    }
+  });
+
+  it('sends the raw key under a custom header name and no Authorization header', async () => {
+    const { comfy, sent } = hostedClient({ apiKey: KEY, authHeader: 'X-Proxy-Key' });
+    await comfy.checkHealth();
+    expect(sent.length).toBeGreaterThan(0);
+    for (const request of sent) {
+      expect(request.headers['X-Proxy-Key']).toBe(KEY);
+      expect(request.headers.Authorization).toBeUndefined();
+    }
+  });
+
+  it('sends no auth header when no key is configured', async () => {
+    const { comfy, sent } = hostedClient({});
+    await comfy.checkHealth();
+    expect(sent.length).toBeGreaterThan(0);
+    for (const request of sent) {
+      expect(request.headers.Authorization).toBeUndefined();
+      expect(request.headers['X-Proxy-Key']).toBeUndefined();
+    }
+  });
+
+  it('never puts the key in error messages', async () => {
+    vi.spyOn(axios, 'create').mockImplementation(
+      () =>
+        ({
+          get: vi.fn(async () => {
+            throw new Error(`upstream rejected ${KEY}`);
+          }),
+          post: vi.fn(async () => {
+            throw new Error(`upstream rejected ${KEY}`);
+          }),
+        }) as never,
+    );
+    const comfy = new ComfyUIClient({ baseUrl: 'http://gpu:8188', ...MODELS, apiKey: KEY });
+    const health = await comfy.checkHealth();
+    expect(health.available).toBe(false);
+    expect(health.error).not.toContain(KEY);
+    expect(health.error).toContain('[redacted]');
+    const submitError = await comfy
+      .submit({ prompt: 'x', width: 512, height: 512 })
+      .catch((error: unknown) => error);
+    expect(String(submitError)).not.toContain(KEY);
+    expect(String(submitError)).toContain('[redacted]');
   });
 });
