@@ -139,6 +139,59 @@ describe('write audit + undo', () => {
     expect(emitted).toHaveLength(sentBefore);
   });
 
+  it('reads a multi-result reply and undoes its side effect too', async () => {
+    const { client, emitted } = setup();
+    const OLD = 'OLDCOMBATxxxxxxx';
+    const SCENE = 'SCENExxxxxxxxxxx';
+    const internals = client as unknown as {
+      socket: { emit: ReturnType<typeof vi.fn> };
+      worldData: { combats: Array<Record<string, unknown>> };
+    };
+    internals.worldData.combats = [{ _id: OLD, active: true, combatants: [] }];
+    const plainEmit = internals.socket.emit.getMockImplementation();
+    // Shape captured live (Foundry 14): creating an active Combat while another
+    // is active answers with `results`, the deactivation flagged as a side effect.
+    internals.socket.emit.mockImplementation((event, payload, ack) => {
+      if (payload.type !== 'Combat' || payload.action !== 'create') {
+        return plainEmit?.(event, payload, ack);
+      }
+      emitted.push(payload);
+      ack({
+        results: [
+          {
+            type: 'Combat',
+            action: 'update',
+            result: [{ _id: OLD, active: false }],
+            operation: {},
+            sideEffect: true,
+          },
+          {
+            type: 'Combat',
+            action: 'create',
+            result: [{ _id: 'NEWCOMBATxxxxxxx', scene: SCENE, active: true, combatants: [] }],
+            operation: {},
+          },
+        ],
+      });
+    });
+
+    const { combatId } = await client.withBatch(() => client.startCombat(SCENE, []));
+    expect(combatId).toBe('NEWCOMBATxxxxxxx');
+    expect(internals.worldData.combats.find((c) => c._id === OLD)?.active).toBe(false);
+
+    const sentBefore = emitted.length;
+    await client.undoWrite();
+    const undo = (
+      emitted.slice(sentBefore) as Array<{ type: string; action: string; operation: never }>
+    ).map((p) => [p.type, p.action, p.operation]);
+    expect(undo[0]).toEqual(['Combat', 'delete', expect.objectContaining({ ids: [combatId] })]);
+    expect(undo[1]).toEqual([
+      'Combat',
+      'update',
+      expect.objectContaining({ updates: [expect.objectContaining({ _id: OLD, active: true })] }),
+    ]);
+  });
+
   it('dry run sends nothing, logs the intent and counts it', async () => {
     const { client, emitted } = setup({ dryRun: true });
     const journal = await client.createJournalEntry('Recap', [{ name: 'p', content: 'x' }]);

@@ -4,6 +4,7 @@
 
 import { z } from 'zod';
 import { action, DomainTool } from '../domain.js';
+import { handlePlaceEncounter } from '../handlers/encounter.js';
 import { handlePlaceActorOnScene, handlePlaceGroup } from '../handlers/import-place.js';
 import {
   handleActivateScene,
@@ -153,6 +154,44 @@ export const tokensEditTool = new DomainTool({
           .describe('Token disposition'),
       }),
       run: (a, ctx) => handlePlaceGroup(a, ctx.foundryClient),
+    }),
+    place_encounter: action({
+      description:
+        'Build an encounter on a scene from foundry_generate encounter output: imports each distinct creature once into the world Actor folder (reusing an existing actor imported from the same compendium entry), lays the tokens out in an area (squares) or region, and optionally starts a combat with them. Tokens are hidden by default. Everything is ONE undo step (folder, actors, tokens, combat). Errors without writing anything if the creatures do not fit.',
+      schema: z.object({
+        creatures: z
+          .array(
+            z.object({
+              uuid: z
+                .string()
+                .optional()
+                .describe('Compendium.<pack>.Actor.<id> (as printed by generate encounter)'),
+              compendiumId: z.string().optional().describe('Actor pack id (instead of uuid)'),
+              documentId: z.string().optional().describe('Entry id (with compendiumId)'),
+              name: z.string().optional().describe('Entry name (with compendiumId)'),
+              actor: z.string().optional().describe('Existing world actor id or name'),
+              count: z.number().int().min(1).max(20).optional().describe('Tokens (default 1)'),
+            }),
+          )
+          .min(1)
+          .max(20),
+        scene: z.string().describe('Scene id or name (partial ok)'),
+        area: z
+          .object({
+            x: z.number().describe('Left column'),
+            y: z.number().describe('Top row'),
+            width: z.number().positive().describe('Width in squares'),
+            height: z.number().positive().describe('Height in squares'),
+          })
+          .optional()
+          .describe('Rectangle in grid squares (or use region_id)'),
+        region_id: z.string().optional().describe('Region id or name to fill (or use area)'),
+        folder: z.string().optional().describe('World Actor folder name (default "Encounters")'),
+        start_combat: z.boolean().optional().describe('Start a combat with the new tokens'),
+        hidden: z.boolean().optional().describe('Place hidden from players (default true)'),
+        spacing: z.number().min(0).optional().describe('Empty squares between tokens (default 1)'),
+      }),
+      run: (a, ctx) => handlePlaceEncounter(a, ctx.foundryClient),
     }),
     update: action({
       description:

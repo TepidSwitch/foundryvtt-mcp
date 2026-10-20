@@ -60,6 +60,9 @@ import { type AuditEntry, fakeDocumentId, namesOf, planUndo, WriteAudit } from '
 /** FoundryVTT document IDs are 16-character alphanumeric strings. */
 const FOUNDRY_ID_PATTERN = /^[a-zA-Z0-9]{16}$/;
 
+/** Fields Foundry's own getIndex always includes; a socket index read returns only what it asks for. */
+const PACK_INDEX_BASE_FIELDS = ['_id', 'name', 'type', 'img'];
+
 /**
  * Characters a dice formula may contain. A cheap sanity gate, not a grammar:
  * it rejects Foundry modifier syntax (`4d6kh3`), attribute references
@@ -190,6 +193,18 @@ export interface FoundryClientConfig {
 interface DocumentSocketResponse {
   /** Created/updated data objects, or deleted ids, on success. */
   result?: unknown[];
+  /**
+   * Set instead of `result` when the operation had server-side side effects
+   * (e.g. creating an active Combat deactivates the previous one): one entry
+   * per operation, side effects flagged with `sideEffect: true`.
+   */
+  results?: Array<{
+    type?: string;
+    action?: string;
+    result?: unknown[];
+    operation?: { parentUuid?: unknown };
+    sideEffect?: boolean;
+  }>;
   /** Present when the server rejects the operation. */
   error?: { message?: string } | null;
   userId?: string;
@@ -648,6 +663,11 @@ export class FoundryClient {
   /** Batch id of the running `withBatch`, or null outside one. */
   getCurrentBatchId(): string | null {
     return this.currentBatchId;
+  }
+
+  /** True while writes are simulated (FOUNDRY_DRY_RUN or a forced dry run). */
+  isDryRunning(): boolean {
+    return this.isDryRun();
   }
 
   private isDryRun(): boolean {
@@ -1162,6 +1182,52 @@ export class FoundryClient {
     return index;
   }
 
+  private packFieldIndexCache = new Map<string, Array<Record<string, unknown>>>();
+
+  /**
+   * Pack index with extra system fields (e.g. `system.details.cr`), read over
+   * the socket with `indexFields` as Foundry's own getIndex does. Cached per
+   * pack and field set. Read-only. Over the socket, `indexFields` is the whole
+   * projection (Foundry's getIndex adds the base fields client-side), so the
+   * base fields are always requested too.
+   */
+  async getPackIndexFields(
+    packId: string,
+    fields: string[],
+  ): Promise<Array<Record<string, unknown>>> {
+    const pack = this.findPack(packId);
+    if (!pack) {
+      throw new Error(`Unknown compendium pack: ${packId}`);
+    }
+    const projection = [...new Set([...PACK_INDEX_BASE_FIELDS, ...fields])];
+    const key = `${packId}|${[...projection].sort().join(',')}`;
+    const cached = this.packFieldIndexCache.get(key);
+    if (cached) {
+      return cached;
+    }
+    const response = await this.emitWithAck<DocumentSocketResponse>('modifyDocument', {
+      type: String(pack.type),
+      action: 'get',
+      operation: {
+        pack: packId,
+        query: {},
+        index: true,
+        indexFields: projection,
+        broadcast: false,
+      },
+    });
+    if (response?.error) {
+      throw new Error(
+        `FoundryVTT rejected pack index read: ${response.error.message || 'unknown error'}`,
+      );
+    }
+    const index = (Array.isArray(response?.result) ? response.result : []) as Array<
+      Record<string, unknown>
+    >;
+    this.packFieldIndexCache.set(key, index);
+    return index;
+  }
+
   /** Reads one full document from a compendium pack (read-only). */
   async getCompendiumDocument(
     packId: string,
@@ -1396,7 +1462,15 @@ export class FoundryClient {
         `FoundryVTT rejected ${action} ${type}: ${response.error.message || 'unknown error'}`,
       );
     }
-    const result = Array.isArray(response?.result) ? response.result : [];
+    const primary = response?.results
+      ? response.results.find((r) => !r.sideEffect && r.type === type && r.action === action)
+      : response;
+    const result = Array.isArray(primary?.result) ? primary.result : [];
+    for (const effect of response?.results ?? []) {
+      if (effect !== primary) {
+        this.recordSideEffect(effect);
+      }
+    }
 
     this.audit.record({
       type,
@@ -1435,6 +1509,58 @@ export class FoundryClient {
       }
     }
     return result;
+  }
+
+  /**
+   * Logs and caches a server-side side effect of our own write (e.g. the
+   * previous Combat deactivated by creating an active one), so the cache stays
+   * current and undoing the batch restores it.
+   */
+  private recordSideEffect(effect: NonNullable<DocumentSocketResponse['results']>[number]): void {
+    const { type, action } = effect;
+    if (!type || (action !== 'create' && action !== 'update' && action !== 'delete')) {
+      return;
+    }
+    const result = Array.isArray(effect.result) ? effect.result : [];
+    const parentUuid =
+      typeof effect.operation?.parentUuid === 'string' && effect.operation.parentUuid
+        ? effect.operation.parentUuid
+        : undefined;
+    const ids =
+      action === 'delete'
+        ? result.map(String)
+        : (result as Array<Record<string, unknown>>).map((d) => String(d._id));
+    const before =
+      action !== 'create' && this.worldData
+        ? findCachedDocuments(this.worldData, type, ids, parentUuid)
+        : undefined;
+    this.audit.record({
+      type,
+      action,
+      ...(parentUuid ? { parentUuid } : {}),
+      ids,
+      names: namesOf(action === 'create' ? (result as Array<Record<string, unknown>>) : before),
+      ...(this.currentUndoOf ? { undoOf: this.currentUndoOf } : {}),
+      ...(this.currentBatchId ? { batchId: this.currentBatchId } : {}),
+      ...(action === 'update' ? { updates: result as Array<Record<string, unknown>> } : {}),
+      ...(before && before.length > 0 ? { before } : {}),
+    });
+    if (this.worldData) {
+      try {
+        applyDocumentBroadcast(this.worldData, {
+          type,
+          action,
+          result,
+          ...(parentUuid ? { parentUuid } : {}),
+        });
+      } catch (error) {
+        logger.warn('Failed to apply write side effect to cached worldData', {
+          type,
+          action,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   }
 
   // ==========================================================================

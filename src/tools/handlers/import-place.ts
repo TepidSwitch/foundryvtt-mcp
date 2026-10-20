@@ -271,7 +271,7 @@ Map is ${cols}×${rows} squares; squares are counted from the top-left of the ma
 // ---------------------------------------------------------------------------
 
 /** Pixel geometry of a scene, as the grid helpers in foundry/import.ts want it. */
-function sceneGeometry(scene: WorldScene): SceneGeometry {
+export function sceneGeometry(scene: WorldScene): SceneGeometry {
   const raw = scene as unknown as Record<string, unknown>;
   return {
     width: scene.width,
@@ -284,7 +284,7 @@ function sceneGeometry(scene: WorldScene): SceneGeometry {
 }
 
 /** Grid squares a token of this actor spans (prototype token width, at least 1). */
-function tokenSpan(actor: { prototypeToken?: unknown }): number {
+export function tokenSpan(actor: { prototypeToken?: unknown }): number {
   const proto = isRec(actor.prototypeToken) ? actor.prototypeToken : {};
   return Math.max(1, Math.round(num(proto.width, 1)));
 }
@@ -355,6 +355,35 @@ export function layoutGroup(entries: GroupEntry[], area: GroupArea, spacing = 1)
   return slots;
 }
 
+/**
+ * Whole grid squares usable for a group: from an explicit rectangle (squares)
+ * or a region's bounding box. Throws InvalidParams when none fit.
+ */
+export function resolveGroupArea(
+  scene: WorldScene,
+  rectArg: { x: number; y: number; width: number; height: number } | undefined,
+  regionId: string | undefined,
+): GroupArea {
+  const g = canvasGeometry(scene);
+  const rect = rectArg ?? regionBounds(g, findEmbedded(g, 'regions', regionId as string));
+  // Only whole squares fully inside the rectangle are usable.
+  const col = Math.max(0, Math.ceil(rect.x - 1e-6));
+  const row = Math.max(0, Math.ceil(rect.y - 1e-6));
+  const area: GroupArea = {
+    col,
+    row,
+    cols: Math.min(g.cols, Math.floor(rect.x + rect.width + 1e-6)) - col,
+    rows: Math.min(g.rows, Math.floor(rect.y + rect.height + 1e-6)) - row,
+  };
+  if (area.cols < 1 || area.rows < 1) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `The area holds no whole grid square on the ${g.cols}×${g.rows} map`,
+    );
+  }
+  return area;
+}
+
 export async function handlePlaceGroup(
   args: {
     scene: string;
@@ -381,24 +410,8 @@ export async function handlePlaceGroup(
       );
     }
     const scene = resolveScene(snapshotOf(foundryClient), args.scene);
-    const g = canvasGeometry(scene);
     const geometry = sceneGeometry(scene);
-    const rect = args.area ?? regionBounds(g, findEmbedded(g, 'regions', args.region_id as string));
-    // Only whole squares fully inside the rectangle are usable.
-    const col = Math.max(0, Math.ceil(rect.x - 1e-6));
-    const row = Math.max(0, Math.ceil(rect.y - 1e-6));
-    const area: GroupArea = {
-      col,
-      row,
-      cols: Math.min(g.cols, Math.floor(rect.x + rect.width + 1e-6)) - col,
-      rows: Math.min(g.rows, Math.floor(rect.y + rect.height + 1e-6)) - row,
-    };
-    if (area.cols < 1 || area.rows < 1) {
-      throw new McpError(
-        ErrorCode.InvalidParams,
-        `The area holds no whole grid square on the ${g.cols}×${g.rows} map`,
-      );
-    }
+    const area = resolveGroupArea(scene, args.area, args.region_id);
     const resolved = args.actors.map((a) => {
       const count = a.count ?? 1;
       if (!Number.isInteger(count) || count < 1 || count > 20) {
