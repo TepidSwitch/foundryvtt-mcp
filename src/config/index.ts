@@ -69,6 +69,10 @@ const ConfigSchema = z.object({
     url: z.string().url().optional(),
     checkpoint: z.string().default('dDBattlemapsSDXL10_upscaleV10.safetensors'),
     vae: z.string().default('sdxl_vae.safetensors'),
+    // Optional key for a hosted or proxied ComfyUI. Sent as `Authorization: Bearer <key>`
+    // unless COMFYUI_AUTH_HEADER names another header, which gets the raw key.
+    apiKey: z.string().optional(),
+    authHeader: z.string().optional(),
   }),
 
   cache: z.object({
@@ -139,6 +143,8 @@ function loadConfig(): Config {
       url: process.env.COMFYUI_URL || undefined,
       checkpoint: process.env.COMFYUI_CHECKPOINT || undefined,
       vae: process.env.COMFYUI_VAE || undefined,
+      apiKey: process.env.COMFYUI_API_KEY || undefined,
+      authHeader: process.env.COMFYUI_AUTH_HEADER || undefined,
     },
 
     cache: {

@@ -123,6 +123,8 @@ class FoundryMCPServer {
         baseUrl: config.comfyui.url,
         checkpoint: config.comfyui.checkpoint,
         vae: config.comfyui.vae,
+        apiKey: config.comfyui.apiKey,
+        authHeader: config.comfyui.authHeader,
       });
       this.maps = new MapJobManager({
         comfy: this.comfyui,
