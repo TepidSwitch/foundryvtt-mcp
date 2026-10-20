@@ -8,7 +8,8 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that i
 ## Features
 
 - **One tool per domain** — `foundry_actors`, `foundry_scenes`, `foundry_journals`, ... each with an `action` field, plus an `_edit` twin for writes
-- **Full world editing** — actors, items, effects, scenes, tokens, combat, journals, audio, chat, folders, files (needs `FOUNDRY_WRITE_ENABLED=true`)
+- **Full world editing** — actors, items, effects, scenes, tokens, combat, journals, audio, chat, folders, roll tables, macros, files (needs `FOUNDRY_WRITE_ENABLED=true`)
+- **Encounter builder** — proposes monsters for the party by XP budget, then places them as one undo step
 - **Safe writes** — audit log, undo (whole batches), dry-run mode
 - **Canvas editing** (opt-in) — walls, doors, regions, tiles, drawings
 - **Code mode** (opt-in) — sandboxed JavaScript for bulk edits, one undo for the whole run
@@ -126,6 +127,9 @@ To configure manually, see the [Configuration Guide](docs/guides/configuration.m
 | `FOUNDRY_TOOLSETS` | No | Comma-separated toolsets to expose (default: all except `canvas` and `script`) |
 | `FOUNDRY_DRY_RUN` | No | `true` logs writes without sending them |
 | `COMFYUI_URL` | No | ComfyUI server URL; enables AI map generation |
+| `COMFYUI_API_KEY` | No | Key for a hosted or proxied ComfyUI (sent as a Bearer token) |
+| `COMFYUI_AUTH_HEADER` | No | Header that carries the ComfyUI key, if not `Authorization` |
+| `COMFYUI_SCENE_FOLDER` | No | Scene folder for generated maps (default: `Generated Maps`) |
 | `LOG_LEVEL` | No | `debug`, `info`, `warn`, or `error` (default: `info`) |
 | `FOUNDRY_TIMEOUT` | No | Request timeout in ms (default: `10000`) |
 
@@ -147,18 +151,19 @@ Tools are named `foundry_<domain>` (read) and `foundry_<domain>_edit` (write); p
 
 | Domain | Read | Write |
 |--------|------|-------|
-| actors | `foundry_actors`: search, get, items, party, find_in_party, compare | `foundry_actors_edit`: update, set_ownership, import |
+| actors | `foundry_actors`: search, get, items, party, find_in_party, compare | `foundry_actors_edit`: update, set_ownership, import, request_rest, heal, damage, set_temp_hp |
 | items | `foundry_items`: search | `foundry_items_edit`: create, update, delete, use, add_to_actor, update_on_actor, remove_from_actor |
 | effects | | `foundry_effects_edit` |
-| scenes, tokens | `foundry_scenes`: search, get, suggest, image | `foundry_scenes_edit`, `foundry_tokens_edit` |
+| scenes, tokens | `foundry_scenes`: search, get, suggest, image | `foundry_scenes_edit` (incl. fit_grid), `foundry_tokens_edit` (incl. place_group, place_encounter) |
 | combat | `foundry_combat`: state | `foundry_combat_edit`: start, next_turn, set_initiative, end |
 | journals | `foundry_journals`: search, get | `foundry_journals_edit` |
 | compendium | `foundry_compendium`: search, get, packs, roll_table | |
 | audio | `foundry_audio`: list | `foundry_audio_edit` |
 | chat | `foundry_chat`: read, roll | `foundry_chat_edit`: send, request_roll, draw_table |
-| world | `foundry_world`: summary, search, browse, users, refresh | `foundry_world_edit`: create_folder, move_to_folder |
+| world | `foundry_world`: summary, search, browse, users, refresh | `foundry_world_edit`: create_folder, move_to_folder, create_macro, update_macro, delete_macro |
+| tables | | `foundry_tables_edit`: create_table, update_table, add_results, remove_results, delete_table, reset_table |
 | files | `foundry_files`: browse | `foundry_files_edit`: mkdir, upload |
-| generate | `foundry_generate`: npc, loot, rule, map_status | `foundry_generate_edit`: map, cancel_map (needs `COMFYUI_URL`) |
+| generate | `foundry_generate`: npc, loot, encounter, map_status, rule | `foundry_generate_edit`: map, cancel_map (needs `COMFYUI_URL`) |
 | history | `foundry_history`: log | `foundry_history_edit`: undo |
 | diagnostics | `foundry_diagnostics`: health, system, logs, search_logs, diagnose | |
 | canvas (opt-in) | `foundry_canvas`: list | `foundry_canvas_edit`: walls, regions, tiles, drawings |
