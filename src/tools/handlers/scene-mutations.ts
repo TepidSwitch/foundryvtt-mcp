@@ -148,6 +148,47 @@ export async function handleUpdateScene(
   });
 }
 
+/** Smallest grid size Foundry accepts, in pixels. */
+const MIN_GRID_SIZE = 50;
+
+export async function handleFitGrid(
+  args: { scene: string; cells_x?: number; cells_y?: number; grid_size?: number },
+  foundryClient: FoundryClient,
+) {
+  return withToolError('fit grid', async () => {
+    const given = [args.cells_x, args.cells_y, args.grid_size].filter((v) => v !== undefined);
+    if (given.length !== 1) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'Give exactly one of cells_x, cells_y or grid_size',
+      );
+    }
+    const scene = resolveScene(snapshotOf(foundryClient), args.scene);
+    if (!(scene.width > 0 && scene.height > 0)) {
+      throw new McpError(ErrorCode.InvalidParams, `Scene "${scene.name}" has no image size`);
+    }
+    const size =
+      args.grid_size !== undefined
+        ? Math.round(args.grid_size)
+        : args.cells_x !== undefined
+          ? Math.round(scene.width / args.cells_x)
+          : Math.round(scene.height / (args.cells_y as number));
+    if (!Number.isFinite(size) || size < MIN_GRID_SIZE) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `That would make the grid ${size} px; Foundry's minimum is ${MIN_GRID_SIZE}. The image is ${scene.width}×${scene.height} px, so ${args.cells_x !== undefined ? `at most ${Math.floor(scene.width / MIN_GRID_SIZE)} squares across` : args.cells_y !== undefined ? `at most ${Math.floor(scene.height / MIN_GRID_SIZE)} squares down` : 'pick a larger grid_size'}.`,
+      );
+    }
+    await foundryClient.updateDocuments('Scene', [{ _id: scene._id, 'grid.size': size }]);
+    const cx = scene.width / size;
+    const cy = scene.height / size;
+    const r = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
+    return text(
+      `📐 **Grid Fitted** "${scene.name}": ${size} px per square on a ${scene.width}×${scene.height} px image = ${r(cx)}×${r(cy)} squares.${Number.isInteger(cx) && Number.isInteger(cy) ? '' : ' The image is not a whole number of squares; the edge squares are partial.'}`,
+    );
+  });
+}
+
 export async function handleAddNote(
   args: {
     scene: string;

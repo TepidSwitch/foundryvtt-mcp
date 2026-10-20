@@ -184,6 +184,7 @@ class FoundryMCPServer {
           diagnosticSystem: this.diagnosticSystem,
           comfyui: this.comfyui,
           maps: this.maps,
+          sceneFolder: config.comfyui.sceneFolder,
         };
         const route = () =>
           this.registry.execute(name, args || {}, context) as Promise<CallToolResult>;

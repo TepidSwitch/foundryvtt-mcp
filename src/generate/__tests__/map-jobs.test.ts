@@ -51,9 +51,16 @@ describe('MapJobManager', () => {
       width: 1000,
       height: 100000,
       gridSize: 10,
+      seed: 7,
     });
     expect(job).toMatchObject({ width: 1024, height: 2048, gridSize: 50, status: 'queued' });
-    expect(comfy.submit).toHaveBeenCalledWith({ prompt: 'p', width: 1024, height: 2048 });
+    expect(comfy.submit).toHaveBeenCalledWith({
+      prompt: 'p',
+      quality: 'low',
+      seed: 7,
+      width: 1024,
+      height: 2048,
+    });
     manager.dispose();
   });
 
@@ -67,6 +74,8 @@ describe('MapJobManager', () => {
       prompt: 'p',
       sceneName: 'Moonlit Tavern',
       gridSize: 70,
+      seed: 42,
+      quality: 'medium',
       folderId: 'FOLDERAAAAAAAAAA',
     });
     await manager.advance(job);
@@ -94,6 +103,18 @@ describe('MapJobManager', () => {
         padding: 0,
         grid: { size: 70, distance: 5, units: 'ft' },
         folder: 'FOLDERAAAAAAAAAA',
+        flags: {
+          'foundryvtt-mcp': {
+            generation: {
+              prompt: 'p',
+              seed: 42,
+              quality: 'medium',
+              width: 1536,
+              height: 1536,
+              gridSize: 70,
+            },
+          },
+        },
       },
     ]);
     manager.dispose();

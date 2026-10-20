@@ -14,6 +14,8 @@ const job = (over: Partial<MapJob> = {}): MapJob => ({
   width: 1536,
   height: 1536,
   gridSize: 70,
+  seed: 1,
+  quality: 'low',
   createdAt: Date.now() - 30_000,
   updatedAt: Date.now(),
   ...over,
@@ -51,6 +53,18 @@ describe('map generation handlers', () => {
       /COMFYUI_URL/,
     );
     expect(textOf(await handleMapStatus({}, bare))).toContain('COMFYUI_URL');
+  });
+
+  it('files the scene in the default folder, creating it when missing', async () => {
+    const { context, start } = ctx({ available: true });
+    const create = vi.fn(async () => [{ _id: 'GENFOLDERAAAAAAA' }]);
+    (context.foundryClient as unknown as Record<string, unknown>).createDocuments = create;
+    await handleGenerateMap(
+      { prompt: 'x', scene_name: 'S' },
+      { ...context, sceneFolder: 'Generated Maps' },
+    );
+    expect(create).toHaveBeenCalledWith('Folder', [{ name: 'Generated Maps', type: 'Scene' }]);
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({ folderId: 'GENFOLDERAAAAAAA' }));
   });
 
   it('refuses to start when ComfyUI is unreachable, with the fix', async () => {

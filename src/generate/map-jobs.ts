@@ -37,6 +37,8 @@ export interface MapJob {
   width: number;
   height: number;
   gridSize: number;
+  seed: number;
+  quality: 'low' | 'medium' | 'high';
   createdAt: number;
   updatedAt: number;
   queuePosition?: number;
@@ -88,13 +90,10 @@ export class MapJobManager {
     const side = SIZE_PIXELS[params.size ?? 'medium'];
     const width = clampSide(params.width ?? side);
     const height = clampSide(params.height ?? side);
-    const input: MapWorkflowInput = {
-      prompt: params.prompt,
-      width,
-      height,
-      ...(params.quality ? { quality: params.quality } : {}),
-      ...(params.seed !== undefined ? { seed: params.seed } : {}),
-    };
+    // Resolve the seed here (not in buildWorkflow) so it can be stored for regeneration.
+    const seed = params.seed ?? Math.floor(Math.random() * 1_000_000);
+    const quality = params.quality ?? 'low';
+    const input: MapWorkflowInput = { prompt: params.prompt, width, height, quality, seed };
     const promptId = await this.deps.comfy.submit(input);
     this.counter += 1;
     const now = Date.now();
@@ -107,6 +106,8 @@ export class MapJobManager {
       width,
       height,
       gridSize: Math.max(MIN_GRID, Math.round(params.gridSize ?? 70)),
+      seed,
+      quality,
       createdAt: now,
       updatedAt: now,
       ...(params.folderId ? { folderId: params.folderId } : {}),
@@ -257,6 +258,18 @@ export class MapJobManager {
           padding: 0,
           grid: { size: job.gridSize, distance: 5, units: 'ft' },
           ...(job.folderId ? { folder: job.folderId } : {}),
+          flags: {
+            'foundryvtt-mcp': {
+              generation: {
+                prompt: job.prompt,
+                seed: job.seed,
+                quality: job.quality,
+                width: job.width,
+                height: job.height,
+                gridSize: job.gridSize,
+              },
+            },
+          },
         },
       ]);
       if (scene?._id) {

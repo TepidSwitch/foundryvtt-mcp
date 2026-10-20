@@ -4,11 +4,12 @@
 
 import { z } from 'zod';
 import { action, DomainTool } from '../domain.js';
-import { handlePlaceActorOnScene } from '../handlers/import-place.js';
+import { handlePlaceActorOnScene, handlePlaceGroup } from '../handlers/import-place.js';
 import {
   handleActivateScene,
   handleAddLight,
   handleAddNote,
+  handleFitGrid,
   handleRemoveLight,
   handleRemoveNote,
   handleUpdateScene,
@@ -114,6 +115,45 @@ export const tokensEditTool = new DomainTool({
       }),
       run: (a, ctx) => handlePlaceActorOnScene(a, ctx.foundryClient),
     }),
+    place_group: action({
+      description:
+        'Lay out several actors as a tidy block of tokens inside a rectangle (area, in grid squares from the map top-left) or a region (region_id; uses the bounding box of its first shape). Fills left to right then top to bottom, honouring each actor prototype token size, with spacing empty squares between tokens (default 1). Errors without placing anything if they do not fit. All tokens are one undo step. Only creates tokens.',
+      schema: z.object({
+        scene: z.string().describe('Scene id or name (partial ok)'),
+        actors: z
+          .array(
+            z.object({
+              ref: z.string().describe('Actor id, name or player name'),
+              count: z
+                .number()
+                .int()
+                .min(1)
+                .max(20)
+                .optional()
+                .describe('Tokens of it (default 1)'),
+            }),
+          )
+          .min(1)
+          .max(20),
+        area: z
+          .object({
+            x: z.number().describe('Left column'),
+            y: z.number().describe('Top row'),
+            width: z.number().positive().describe('Width in squares'),
+            height: z.number().positive().describe('Height in squares'),
+          })
+          .optional()
+          .describe('Rectangle in grid squares (or use region_id)'),
+        region_id: z.string().optional().describe('Region id or name to fill (or use area)'),
+        spacing: z.number().min(0).optional().describe('Empty squares between tokens (default 1)'),
+        hidden: z.boolean().optional().describe('Place hidden from players'),
+        disposition: z
+          .enum(['hostile', 'neutral', 'friendly'])
+          .optional()
+          .describe('Token disposition'),
+      }),
+      run: (a, ctx) => handlePlaceGroup(a, ctx.foundryClient),
+    }),
     update: action({
       description:
         'Change a placed token: name, hidden, disposition, size (grid squares, sets width and height), width, height, elevation, rotation, alpha, locked. Only the fields you give change.',
@@ -204,6 +244,17 @@ export const scenesEditTool = new DomainTool({
         grid_units: z.string().optional().describe('Distance unit, e.g. "ft"'),
       }),
       run: (a, ctx) => handleUpdateScene(a, ctx.foundryClient),
+    }),
+    fit_grid: action({
+      description:
+        'Set the grid size so a given number of squares spans the map image: cells_x (squares across) or cells_y (squares down), or set grid_size in pixels directly. Uses the scene image size (no image analysis); the grid never goes below 50 px. Reports the resulting square counts.',
+      schema: z.object({
+        scene: sceneRef,
+        cells_x: z.number().int().positive().optional().describe('Squares across the image'),
+        cells_y: z.number().int().positive().optional().describe('Squares down the image'),
+        grid_size: z.number().int().min(50).optional().describe('Pixels per square (min 50)'),
+      }),
+      run: (a, ctx) => handleFitGrid(a, ctx.foundryClient),
     }),
     add_note: action({
       description:
