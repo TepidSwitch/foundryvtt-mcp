@@ -4,6 +4,7 @@
 
 import { z } from 'zod';
 import { action, DomainTool } from '../domain.js';
+import { handleGenerateEncounter } from '../handlers/encounter.js';
 import { handleGenerateLoot, handleGenerateNPC, handleLookupRule } from '../handlers/generation.js';
 import { handleCancelMap, handleGenerateMap, handleMapStatus } from '../handlers/map-generation.js';
 
@@ -32,6 +33,35 @@ export const generateTool = new DomainTool({
         treasureType: z.string().optional().describe('Accepted but unused'),
       }),
       run: (a, ctx) => handleGenerateLoot(a, ctx.foundryClient),
+    }),
+    encounter: action({
+      description:
+        '2024-rules encounter options for the party: budget from party levels (Low/Moderate/High XP per character, summed), monsters from the compendium by CR (and optionally creature type or habitat), 2-3 options (boss, leader with minions, swarm) with per-creature XP and total vs budget. Each option prints a creatures array to pass to foundry_tokens_edit place_encounter. Creates nothing.',
+      schema: z.object({
+        party: z
+          .array(z.string())
+          .optional()
+          .describe('Actor ids or names (default: every user-assigned character)'),
+        difficulty: z.enum(['low', 'moderate', 'high']).describe('Encounter difficulty'),
+        creature_type: z
+          .string()
+          .optional()
+          .describe('Creature type, e.g. undead, beast, humanoid'),
+        environment: z
+          .string()
+          .optional()
+          .describe('Habitat from the monster data, e.g. forest, underdark, urban, any listed'),
+        max_creatures: z.number().int().min(1).max(20).optional().describe('Default 6'),
+        packs: z.array(z.string()).optional().describe('Actor compendium pack ids (default: all)'),
+        seed: z
+          .number()
+          .int()
+          .optional()
+          .describe(
+            'Vary which equal-XP monster is picked (default random; the output prints the seed used)',
+          ),
+      }),
+      run: (a, ctx) => handleGenerateEncounter(a, ctx.foundryClient),
     }),
     map_status: action({
       description:

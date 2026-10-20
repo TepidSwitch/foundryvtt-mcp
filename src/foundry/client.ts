@@ -60,6 +60,9 @@ import { type AuditEntry, fakeDocumentId, namesOf, planUndo, WriteAudit } from '
 /** FoundryVTT document IDs are 16-character alphanumeric strings. */
 const FOUNDRY_ID_PATTERN = /^[a-zA-Z0-9]{16}$/;
 
+/** Fields Foundry's own getIndex always includes; a socket index read returns only what it asks for. */
+const PACK_INDEX_BASE_FIELDS = ['_id', 'name', 'type', 'img'];
+
 /**
  * Characters a dice formula may contain. A cheap sanity gate, not a grammar:
  * it rejects Foundry modifier syntax (`4d6kh3`), attribute references
@@ -662,6 +665,11 @@ export class FoundryClient {
     return this.currentBatchId;
   }
 
+  /** True while writes are simulated (FOUNDRY_DRY_RUN or a forced dry run). */
+  isDryRunning(): boolean {
+    return this.isDryRun();
+  }
+
   private isDryRun(): boolean {
     return Boolean(this.config.dryRun) || this.forceDryRun;
   }
@@ -1171,6 +1179,52 @@ export class FoundryClient {
       Record<string, unknown>
     >;
     this.packIndexCache.set(packId, index);
+    return index;
+  }
+
+  private packFieldIndexCache = new Map<string, Array<Record<string, unknown>>>();
+
+  /**
+   * Pack index with extra system fields (e.g. `system.details.cr`), read over
+   * the socket with `indexFields` as Foundry's own getIndex does. Cached per
+   * pack and field set. Read-only. Over the socket, `indexFields` is the whole
+   * projection (Foundry's getIndex adds the base fields client-side), so the
+   * base fields are always requested too.
+   */
+  async getPackIndexFields(
+    packId: string,
+    fields: string[],
+  ): Promise<Array<Record<string, unknown>>> {
+    const pack = this.findPack(packId);
+    if (!pack) {
+      throw new Error(`Unknown compendium pack: ${packId}`);
+    }
+    const projection = [...new Set([...PACK_INDEX_BASE_FIELDS, ...fields])];
+    const key = `${packId}|${[...projection].sort().join(',')}`;
+    const cached = this.packFieldIndexCache.get(key);
+    if (cached) {
+      return cached;
+    }
+    const response = await this.emitWithAck<DocumentSocketResponse>('modifyDocument', {
+      type: String(pack.type),
+      action: 'get',
+      operation: {
+        pack: packId,
+        query: {},
+        index: true,
+        indexFields: projection,
+        broadcast: false,
+      },
+    });
+    if (response?.error) {
+      throw new Error(
+        `FoundryVTT rejected pack index read: ${response.error.message || 'unknown error'}`,
+      );
+    }
+    const index = (Array.isArray(response?.result) ? response.result : []) as Array<
+      Record<string, unknown>
+    >;
+    this.packFieldIndexCache.set(key, index);
     return index;
   }
 
