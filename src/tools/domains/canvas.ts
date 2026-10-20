@@ -127,7 +127,7 @@ export const canvasTool = new DomainTool({
   actions: {
     list: action({
       description:
-        'List one kind of canvas object on a scene. For walls, filter by door/wall/window/terrain/invisible/ethereal/"secret door" or give x, y, width, height (squares) to see only walls with an end inside that area. Scenes can hold hundreds of walls, so narrow before raising limit.',
+        'List one kind of canvas object on a scene. For walls, filter by door/wall/window/terrain/invisible/ethereal/"secret door" or give x, y, width, height (squares) to see only walls with an end inside that area. Scenes can hold hundreds of walls, so narrow before raising limit, or page through with offset.',
       schema: z.object({
         scene,
         kind: z.enum(['walls', 'regions', 'tiles', 'drawings']).describe('What to list'),
@@ -149,6 +149,14 @@ export const canvasTool = new DomainTool({
         width: z.number().optional().describe('Walls only: area width (squares)'),
         height: z.number().optional().describe('Walls only: area height (squares)'),
         limit: z.number().optional().describe('Maximum entries (default 40, max 200)'),
+        offset: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe(
+            'Entries to skip before the page (default 0); use the next offset in the footer',
+          ),
       }),
       run: (a, ctx) => handleCanvasList(a, ctx.foundryClient),
     }),

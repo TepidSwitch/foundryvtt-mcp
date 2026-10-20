@@ -14,7 +14,7 @@ import type { WorldData } from '../../foundry/types.js';
 import { isRec, num, type Rec, str } from './dnd5e.js';
 import { resolveFolder } from './import-place.js';
 import { resolveByRef, snapshotOf } from './refs.js';
-import { withToolError } from './utils.js';
+import { pageSlice, withToolError } from './utils.js';
 
 /** CONST.PLAYLIST_MODES */
 export const PLAYLIST_MODES = {
@@ -67,7 +67,7 @@ function isPlaying(playlist: Rec): boolean {
 // ---------------------------------------------------------------------------
 
 export async function handleListAudio(
-  args: { query?: string; playlist?: string; limit?: number },
+  args: { query?: string; playlist?: string; limit?: number; offset?: number },
   foundryClient: FoundryClient,
 ) {
   return withToolError('list audio', async () => {
@@ -93,16 +93,13 @@ export async function handleListAudio(
         str(p.name).toLowerCase().includes(q) ||
         soundsOf(p).some((s) => str(s.name).toLowerCase().includes(q)),
     );
-    const rows = all
-      .slice(0, limit)
-      .map(
-        (p) =>
-          `- **${str(p.name)}** \`${str(p._id)}\` — ${soundsOf(p).length} sounds · ${modeName(p)}${isPlaying(p) ? ' · PLAYING' : ''}`,
-      );
-    const more =
-      all.length > limit ? `\n_Showing ${limit} of ${all.length}; narrow with query._` : '';
+    const page = pageSlice(all, limit, args.offset);
+    const rows = page.items.map(
+      (p) =>
+        `- **${str(p.name)}** \`${str(p._id)}\` — ${soundsOf(p).length} sounds · ${modeName(p)}${isPlaying(p) ? ' · PLAYING' : ''}`,
+    );
     return text(
-      `🎵 **Playlists** (${all.length})\n${rows.length > 0 ? rows.join('\n') : '_None found._'}${more}\n\n_Pass playlist to list its sounds with ids._`,
+      `🎵 **Playlists** (${all.length})\n${rows.length > 0 ? rows.join('\n') : '_None found._'}${page.footer}\n\n_Pass playlist to list its sounds with ids._`,
     );
   });
 }

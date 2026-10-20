@@ -16,6 +16,7 @@ import {
   findEmbedded,
   type Geometry,
   pageLimit,
+  pageSlice,
   px,
   sceneFor,
   squares,
@@ -294,6 +295,7 @@ export function listWalls(
     filter?: string | undefined;
     area?: { x: number; y: number; width: number; height: number } | undefined;
     limit?: number | undefined;
+    offset?: number | undefined;
   },
 ): string {
   let walls = embeddedOf(g.scene, 'walls');
@@ -316,12 +318,12 @@ export function listWalls(
         return inside(x1, y1) || inside(x2, y2);
       })
     : located;
-  const limit = pageLimit(filter.limit);
-  const lines = inArea.slice(0, limit).map(({ w, c }) => {
+  const page = pageSlice(inArea, pageLimit(filter.limit), filter.offset);
+  const lines = page.items.map(({ w, c }) => {
     const [x1, y1] = squares(g, num(c[0]), num(c[1]));
     const [x2, y2] = squares(g, num(c[2]), num(c[3]));
     const state = num(w.door) > 0 ? ` · ${['closed', 'open', 'locked'][num(w.ds)] ?? '?'}` : '';
     return `- \`${str(w._id)}\` (${x1}, ${y1}) → (${x2}, ${y2}) · ${wallCategory(w)}${state}`;
   });
-  return `🧱 **Walls on "${g.scene.name}"** — ${inArea.length} match${inArea.length === 1 ? '' : 'es'} of ${embeddedOf(g.scene, 'walls').length}\n${lines.join('\n') || '_None._'}${inArea.length > limit ? `\n_Showing ${limit}; narrow with area or filter, or raise limit (max 200)._` : ''}`;
+  return `🧱 **Walls on "${g.scene.name}"** — ${inArea.length} match${inArea.length === 1 ? '' : 'es'} of ${embeddedOf(g.scene, 'walls').length}\n${lines.join('\n') || '_None._'}${page.footer}`;
 }

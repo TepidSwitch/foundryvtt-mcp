@@ -26,7 +26,7 @@ import {
   truncate,
 } from './dnd5e.js';
 import { folderPath } from './scenes.js';
-import { withToolError } from './utils.js';
+import { pageSlice, withToolError } from './utils.js';
 
 type Rec = Record<string, unknown>;
 
@@ -355,10 +355,16 @@ export async function handleGetRollTable(
 const KINDS = ['playlists', 'macros', 'tables', 'modules', 'folders', 'packs'] as const;
 
 export async function handleBrowseWorld(
-  args: { kind?: string; query?: string; folder_type?: string; limit?: number },
+  args: {
+    kind?: string;
+    query?: string;
+    folder_type?: string;
+    limit?: number;
+    offset?: number;
+  },
   foundryClient: FoundryClient,
 ) {
-  const { kind, query, folder_type, limit = 60 } = args;
+  const { kind, query, folder_type, limit = 60, offset } = args;
   if (!kind || !(KINDS as readonly string[]).includes(kind)) {
     throw new McpError(ErrorCode.InvalidParams, `kind must be one of: ${KINDS.join(', ')}`);
   }
@@ -405,12 +411,12 @@ export async function handleBrowseWorld(
     }
 
     const filtered = q ? rows.filter((r) => r.toLowerCase().includes(q)) : rows;
-    const shown = filtered.slice(0, limit);
+    const page = pageSlice(filtered, limit, offset);
     return {
       content: [
         {
           type: 'text',
-          text: `📚 **${kind}** — ${filtered.length}${q ? ` matching "${query}"` : ''}${filtered.length > shown.length ? ` (showing ${shown.length})` : ''}\n\n${shown.join('\n') || 'none'}`,
+          text: `📚 **${kind}** — ${filtered.length}${q ? ` matching "${query}"` : ''}\n\n${page.items.join('\n') || 'none'}${page.footer}`,
         },
       ],
     };

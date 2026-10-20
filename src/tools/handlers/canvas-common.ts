@@ -120,3 +120,5 @@ export function findEmbedded(
 export function pageLimit(limit: number | undefined, fallback = 40): number {
   return Math.min(Math.max(Math.round(limit ?? fallback), 1), 200);
 }
+
+export { pageFooter, pageSlice } from './utils.js';

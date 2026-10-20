@@ -197,6 +197,7 @@ export interface SearchActorsParams {
   query?: string;
   type?: string;
   limit?: number;
+  offset?: number;
 }
 
 export interface SearchItemsParams {
@@ -806,7 +807,8 @@ export class FoundryClient {
 
     const total = results.length;
     const limit = params.limit || 10;
-    const actors: FoundryActor[] = results.slice(0, limit).map(worldActorToFoundry);
+    const offset = Math.max(params.offset ?? 0, 0);
+    const actors: FoundryActor[] = results.slice(offset, offset + limit).map(worldActorToFoundry);
 
     return { actors, total, page: 1, limit };
   }

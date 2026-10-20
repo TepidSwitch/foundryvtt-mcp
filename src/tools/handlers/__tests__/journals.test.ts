@@ -78,6 +78,25 @@ describe('handleSearchJournals', () => {
       expect(text).toContain('**Journal 4**');
       expect(text).not.toContain('**Journal 5**');
     });
+
+    it('pages results with offset and a next-offset footer', async () => {
+      const journals: MockJournal[] = Array.from({ length: 25 }, (_, i) =>
+        makeJournal(`jrnl-${i}`, `Journal ${i}`, 1),
+      );
+      const client = {
+        searchJournals: vi.fn(() => journals),
+      } as unknown as FoundryClient;
+
+      const text = getText(
+        await handleSearchJournals({ query: 'j', limit: 5, offset: 20 }, client),
+      );
+
+      expect(text).toContain('**Journal 20**');
+      expect(text).toContain('**Journal 24**');
+      expect(text).not.toContain('**Journal 19**');
+      expect(text).toContain('_Showing 21–25 of 25._');
+      expect(text).not.toContain('next offset');
+    });
   });
 
   describe('edge cases', () => {

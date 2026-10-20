@@ -17,6 +17,7 @@ import {
   type Geometry,
   len,
   pageLimit,
+  pageSlice,
   px,
   sceneFor,
   squares,
@@ -226,10 +227,10 @@ export async function handleRemoveRegion(
   });
 }
 
-export function listRegions(g: Geometry, limit?: number): string {
+export function listRegions(g: Geometry, limit?: number, offset?: number): string {
   const regions = embeddedOf(g.scene, 'regions');
-  const max = pageLimit(limit);
-  const lines = regions.slice(0, max).map((r) => {
+  const page = pageSlice(regions, pageLimit(limit), offset);
+  const lines = page.items.map((r) => {
     const shapes = (Array.isArray(r.shapes) ? r.shapes : []) as Rec[];
     const first = shapes[0];
     const where =
@@ -239,5 +240,5 @@ export function listRegions(g: Geometry, limit?: number): string {
     const behaviors = Array.isArray(r.behaviors) ? r.behaviors.length : 0;
     return `- **${str(r.name)}** \`${str(r._id)}\` — ${[...new Set(shapes.map((s) => str(s.type)))].join('/') || 'no shapes'} ×${shapes.length}${where}${behaviors ? ` · ${behaviors} behavior(s)` : ''}${r.hidden === true ? ' · hidden' : ''}${r.locked === true ? ' · locked' : ''}${num(r.visibility) !== 4 ? ` · visibility ${num(r.visibility)}` : ''}`;
   });
-  return `🔷 **Regions on "${g.scene.name}"** (${regions.length})\n${lines.join('\n') || '_None._'}${regions.length > max ? `\n_Showing ${max} of ${regions.length}._` : ''}`;
+  return `🔷 **Regions on "${g.scene.name}"** (${regions.length})\n${lines.join('\n') || '_None._'}${page.footer}`;
 }
