@@ -326,6 +326,33 @@ describe('unlinked token ActorDelta effects', () => {
   });
 });
 
+describe('unlinked token ActorDelta updates', () => {
+  it('merges nested and dot-path changes into token.delta', () => {
+    const world = buildWorldData();
+    const parentUuid = `Scene.${SCENE_ID}.Token.${TOKEN_ID}`;
+    expect(
+      applyDocumentBroadcast(world, {
+        type: 'ActorDelta',
+        action: 'update',
+        result: [{ _id: TOKEN_ID, system: { attributes: { hp: { value: 16 } } } }],
+        parentUuid,
+      }),
+    ).toBe(true);
+    applyDocumentBroadcast(world, {
+      type: 'ActorDelta',
+      action: 'update',
+      result: [{ _id: TOKEN_ID, 'system.attributes.hp.temp': 4 }],
+      parentUuid,
+    });
+    const token = (
+      world.scenes[0] as unknown as {
+        tokens: Array<{ _id: string; delta?: { system?: unknown } }>;
+      }
+    ).tokens.find((t) => t._id === TOKEN_ID);
+    expect(token?.delta?.system).toEqual({ attributes: { hp: { value: 16, temp: 4 } } });
+  });
+});
+
 /**
  * Issue #218 — `activeUsers` is a top-level `WorldData` field, not a document
  * collection, so `modifyDocument` never touches it. FoundryVTT signals presence
