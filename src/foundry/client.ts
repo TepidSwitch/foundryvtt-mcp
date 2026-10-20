@@ -190,6 +190,18 @@ export interface FoundryClientConfig {
 interface DocumentSocketResponse {
   /** Created/updated data objects, or deleted ids, on success. */
   result?: unknown[];
+  /**
+   * Set instead of `result` when the operation had server-side side effects
+   * (e.g. creating an active Combat deactivates the previous one): one entry
+   * per operation, side effects flagged with `sideEffect: true`.
+   */
+  results?: Array<{
+    type?: string;
+    action?: string;
+    result?: unknown[];
+    operation?: { parentUuid?: unknown };
+    sideEffect?: boolean;
+  }>;
   /** Present when the server rejects the operation. */
   error?: { message?: string } | null;
   userId?: string;
@@ -1396,7 +1408,15 @@ export class FoundryClient {
         `FoundryVTT rejected ${action} ${type}: ${response.error.message || 'unknown error'}`,
       );
     }
-    const result = Array.isArray(response?.result) ? response.result : [];
+    const primary = response?.results
+      ? response.results.find((r) => !r.sideEffect && r.type === type && r.action === action)
+      : response;
+    const result = Array.isArray(primary?.result) ? primary.result : [];
+    for (const effect of response?.results ?? []) {
+      if (effect !== primary) {
+        this.recordSideEffect(effect);
+      }
+    }
 
     this.audit.record({
       type,
@@ -1435,6 +1455,58 @@ export class FoundryClient {
       }
     }
     return result;
+  }
+
+  /**
+   * Logs and caches a server-side side effect of our own write (e.g. the
+   * previous Combat deactivated by creating an active one), so the cache stays
+   * current and undoing the batch restores it.
+   */
+  private recordSideEffect(effect: NonNullable<DocumentSocketResponse['results']>[number]): void {
+    const { type, action } = effect;
+    if (!type || (action !== 'create' && action !== 'update' && action !== 'delete')) {
+      return;
+    }
+    const result = Array.isArray(effect.result) ? effect.result : [];
+    const parentUuid =
+      typeof effect.operation?.parentUuid === 'string' && effect.operation.parentUuid
+        ? effect.operation.parentUuid
+        : undefined;
+    const ids =
+      action === 'delete'
+        ? result.map(String)
+        : (result as Array<Record<string, unknown>>).map((d) => String(d._id));
+    const before =
+      action !== 'create' && this.worldData
+        ? findCachedDocuments(this.worldData, type, ids, parentUuid)
+        : undefined;
+    this.audit.record({
+      type,
+      action,
+      ...(parentUuid ? { parentUuid } : {}),
+      ids,
+      names: namesOf(action === 'create' ? (result as Array<Record<string, unknown>>) : before),
+      ...(this.currentUndoOf ? { undoOf: this.currentUndoOf } : {}),
+      ...(this.currentBatchId ? { batchId: this.currentBatchId } : {}),
+      ...(action === 'update' ? { updates: result as Array<Record<string, unknown>> } : {}),
+      ...(before && before.length > 0 ? { before } : {}),
+    });
+    if (this.worldData) {
+      try {
+        applyDocumentBroadcast(this.worldData, {
+          type,
+          action,
+          result,
+          ...(parentUuid ? { parentUuid } : {}),
+        });
+      } catch (error) {
+        logger.warn('Failed to apply write side effect to cached worldData', {
+          type,
+          action,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   }
 
   // ==========================================================================
