@@ -20,6 +20,12 @@ export const filesTool = new DomainTool({
         path: z.string().optional().describe('Folder to list (default: the data root)'),
         extensions: z.array(z.string()).optional().describe('Only files with these extensions'),
         limit: z.number().optional().describe('Maximum entries to show (default 60)'),
+        offset: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe('Entries to skip before the page (default 0)'),
       }),
       run: (a, ctx) => handleBrowseFiles(a, ctx.foundryClient),
     }),

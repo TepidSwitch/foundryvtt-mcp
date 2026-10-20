@@ -48,6 +48,12 @@ export const worldTool = new DomainTool({
           .optional()
           .describe('Folder document type for kind="folders", e.g. Scene, Actor'),
         limit: z.number().optional().describe('Maximum rows (default 60)'),
+        offset: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe('Rows to skip before the page (default 0)'),
       }),
       run: (a, ctx) => handleBrowseWorld(a, ctx.foundryClient),
     }),

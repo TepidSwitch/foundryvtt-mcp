@@ -14,6 +14,7 @@ import {
   type Geometry,
   len,
   pageLimit,
+  pageSlice,
   px,
   sceneFor,
   squares,
@@ -183,18 +184,18 @@ export async function handleRemoveDrawing(
   });
 }
 
-export function listDrawings(g: Geometry, limit?: number): string {
+export function listDrawings(g: Geometry, limit?: number, offset?: number): string {
   const drawings = embeddedOf(g.scene, 'drawings');
-  const max = pageLimit(limit);
+  const page = pageSlice(drawings, pageLimit(limit), offset);
   const kinds: Record<string, string> = {
     r: 'rectangle',
     e: 'ellipse',
     p: 'polygon',
     f: 'freehand',
   };
-  const lines = drawings.slice(0, max).map((d) => {
+  const lines = page.items.map((d) => {
     const shape = (d.shape ?? {}) as Rec;
     return `- \`${str(d._id)}\` ${kinds[str(shape.type)] ?? str(shape.type)} at (${squares(g, num(d.x), num(d.y)).join(', ')})${d.text ? ` "${str(d.text)}"` : ''}${d.hidden === true ? ' · hidden' : ''}`;
   });
-  return `✏️ **Drawings on "${g.scene.name}"** (${drawings.length})\n${lines.join('\n') || '_None._'}${drawings.length > max ? `\n_Showing ${max} of ${drawings.length}._` : ''}`;
+  return `✏️ **Drawings on "${g.scene.name}"** (${drawings.length})\n${lines.join('\n') || '_None._'}${page.footer}`;
 }

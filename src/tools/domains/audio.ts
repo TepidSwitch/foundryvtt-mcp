@@ -41,6 +41,12 @@ export const audioTool = new DomainTool({
           .describe('Only playlists whose name or a sound name contains this'),
         playlist: z.string().optional().describe('Show one playlist in detail (id or name)'),
         limit: z.number().optional().describe('Maximum playlists (default 25)'),
+        offset: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe('Playlists to skip before the page (default 0)'),
       }),
       run: (a, ctx) => handleListAudio(a, ctx.foundryClient),
     }),

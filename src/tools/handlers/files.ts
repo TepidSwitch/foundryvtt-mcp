@@ -13,14 +13,14 @@ import {
   normalizeDataPath,
   sanitizeFilename,
 } from '../../foundry/files.js';
-import { withToolError } from './utils.js';
+import { pageSlice, withToolError } from './utils.js';
 
 function text(t: string) {
   return { content: [{ type: 'text', text: t }] };
 }
 
 export async function handleBrowseFiles(
-  args: { path?: string; extensions?: string[]; limit?: number },
+  args: { path?: string; extensions?: string[]; limit?: number; offset?: number },
   foundryClient: FoundryClient,
 ) {
   return withToolError('browse files', async () => {
@@ -30,10 +30,9 @@ export async function handleBrowseFiles(
     });
     const dirs = listing.dirs.map((d) => `- 📁 ${d}`);
     const files = listing.files.map((f) => `- ${f}`);
-    const shown = [...dirs, ...files].slice(0, limit);
-    const total = dirs.length + files.length;
+    const page = pageSlice([...dirs, ...files], limit, args.offset);
     return text(
-      `📂 **${listing.target || '(data folder root)'}** — ${dirs.length} folders, ${files.length} files\n${shown.join('\n') || '_Empty._'}${total > limit ? `\n_Showing ${limit} of ${total}; browse a subfolder or filter with extensions._` : ''}`,
+      `📂 **${listing.target || '(data folder root)'}** — ${dirs.length} folders, ${files.length} files\n${page.items.join('\n') || '_Empty._'}${page.footer}`,
     );
   });
 }

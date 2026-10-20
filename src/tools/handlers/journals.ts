@@ -4,18 +4,18 @@
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
-import { withToolError } from './utils.js';
+import { pageSlice, withToolError } from './utils.js';
 
 export async function handleSearchJournals(
-  args: { query: string; limit?: number },
+  args: { query: string; limit?: number; offset?: number },
   foundryClient: FoundryClient,
 ) {
   return withToolError('search journals', async () => {
     const results = foundryClient.searchJournals(args.query);
     const limit = args.limit || 10;
-    const limited = results.slice(0, limit);
+    const page = pageSlice(results, limit, args.offset);
 
-    if (limited.length === 0) {
+    if (results.length === 0) {
       return {
         content: [
           {
@@ -26,7 +26,7 @@ export async function handleSearchJournals(
       };
     }
 
-    const formatted = limited
+    const formatted = page.items
       .map((j) => {
         const pageCount = j.pages?.length || 0;
         return `- **${j.name}** (${pageCount} page${pageCount !== 1 ? 's' : ''}) — ID: ${j._id}`;
@@ -37,7 +37,7 @@ export async function handleSearchJournals(
       content: [
         {
           type: 'text',
-          text: `**Journal Search** — "${args.query}" (${results.length} results)\n\n${formatted}`,
+          text: `**Journal Search** — "${args.query}" (${results.length} results)\n\n${formatted}${page.footer}`,
         },
       ],
     };

@@ -79,6 +79,14 @@ describe('audio handlers', () => {
     expect(byTrack).not.toContain('Tavern');
   });
 
+  it('pages the playlist list with offset and a footer', async () => {
+    const { mock } = client();
+    const second = textOf(await handleListAudio({ limit: 1, offset: 1 }, mock));
+    expect(second).toContain('**Rain**');
+    expect(second).not.toContain('**Tavern**');
+    expect(second).toContain('_Showing 2–2 of 2._');
+  });
+
   it('plays the first track of a sequential playlist, like Foundry playAll', async () => {
     const { mock, update } = client();
     await handleAudioPlay({ playlist: 'Tavern' }, mock);

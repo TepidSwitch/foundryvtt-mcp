@@ -25,3 +25,30 @@ export async function withToolError<T>(toolName: string, fn: () => Promise<T>): 
     );
   }
 }
+
+/**
+ * Footer for one page of a list, or '' when the page holds the whole list.
+ * `next offset` is omitted on the last page.
+ */
+export function pageFooter(total: number, offset: number, shown: number): string {
+  if (offset === 0 && shown >= total) {
+    return '';
+  }
+  if (shown === 0) {
+    return `\n_No entries at offset ${offset}; ${total} total._`;
+  }
+  const end = offset + shown;
+  const next = end < total ? `; next offset=${end}` : '';
+  return `\n_Showing ${offset + 1}–${end} of ${total}${next}._`;
+}
+
+/** Takes one page of `items` starting at `offset`, with its footer. */
+export function pageSlice<T>(
+  items: readonly T[],
+  limit: number,
+  offset = 0,
+): { items: T[]; footer: string } {
+  const start = Math.max(Math.floor(offset), 0);
+  const page = items.slice(start, start + limit);
+  return { items: page, footer: pageFooter(items.length, start, page.length) };
+}

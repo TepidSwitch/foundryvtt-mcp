@@ -35,6 +35,12 @@ export const actorsTool = new DomainTool({
         query: z.string().optional().describe('Search text for actor names'),
         type: z.string().optional().describe('Actor type filter (character, npc, ...)'),
         limit: z.number().optional().describe('Maximum results (default 10)'),
+        offset: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe('Results to skip before the page (default 0)'),
       }),
       run: (a, ctx) => handleSearchActors(a, ctx.foundryClient),
     }),

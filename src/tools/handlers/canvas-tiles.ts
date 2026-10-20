@@ -11,6 +11,7 @@ import {
   type Geometry,
   len,
   pageLimit,
+  pageSlice,
   px,
   sceneFor,
   squares,
@@ -133,13 +134,13 @@ export async function handleRemoveTile(
   });
 }
 
-export function listTiles(g: Geometry, limit?: number): string {
+export function listTiles(g: Geometry, limit?: number, offset?: number): string {
   const tiles = embeddedOf(g.scene, 'tiles');
-  const max = pageLimit(limit);
-  const lines = tiles.slice(0, max).map((t) => {
+  const page = pageSlice(tiles, pageLimit(limit), offset);
+  const lines = page.items.map((t) => {
     const at = squares(g, num(t.x), num(t.y));
     const src = str((t.texture as Rec | undefined)?.src);
     return `- \`${str(t._id)}\` ${src.split('/').pop() || '(no image)'} at (${at.join(', ')}) ${Math.round((num(t.width) / g.size) * 100) / 100}×${Math.round((num(t.height) / g.size) * 100) / 100} sq${t.hidden === true ? ' · hidden' : ''}${t.locked === true ? ' · locked' : ''}`;
   });
-  return `🖼️ **Tiles on "${g.scene.name}"** (${tiles.length})\n${lines.join('\n') || '_None._'}${tiles.length > max ? `\n_Showing ${max} of ${tiles.length}._` : ''}`;
+  return `🖼️ **Tiles on "${g.scene.name}"** (${tiles.length})\n${lines.join('\n') || '_None._'}${page.footer}`;
 }

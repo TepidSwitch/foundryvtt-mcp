@@ -8,7 +8,7 @@ import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
 import { actorLabel, resolveActor, sheetFor } from './character.js';
 import { buildEffectiveSheet } from './effects.js';
-import { withToolError } from './utils.js';
+import { pageFooter, withToolError } from './utils.js';
 
 /**
  * Handles actor search requests
@@ -18,18 +18,22 @@ export async function handleSearchActors(
     query?: string;
     type?: string;
     limit?: number;
+    offset?: number;
   },
   foundryClient: FoundryClient,
 ) {
-  const { query, type, limit = 10 } = args;
+  const { query, type, limit = 10, offset = 0 } = args;
 
   return withToolError('search actors', async () => {
-    const searchParams: { query: string; type?: string; limit: number } = {
+    const searchParams: { query: string; type?: string; limit: number; offset?: number } = {
       query: query || '',
       limit,
     };
     if (type) {
       searchParams.type = type;
+    }
+    if (offset > 0) {
+      searchParams.offset = offset;
     }
     const result = await foundryClient.searchActors(searchParams);
 
@@ -57,7 +61,7 @@ export async function handleSearchActors(
 **Type Filter:** ${type || 'All types'}
 **Results:** ${result.actors.length}/${result.total} total
 
-${actorList || 'No actors found matching the criteria.'}
+${actorList || 'No actors found matching the criteria.'}${pageFooter(result.total, offset, result.actors.length)}
 
 **Page:** ${result.page} | **Limit:** ${result.limit}`,
         },

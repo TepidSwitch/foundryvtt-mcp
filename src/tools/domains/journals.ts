@@ -42,6 +42,12 @@ export const journalsTool = new DomainTool({
       schema: z.object({
         query: z.string().describe('Keyword to look for'),
         limit: z.number().optional().describe('Maximum results (default 10)'),
+        offset: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe('Results to skip before the page (default 0)'),
       }),
       run: (a, ctx) => handleSearchJournals(a, ctx.foundryClient),
     }),

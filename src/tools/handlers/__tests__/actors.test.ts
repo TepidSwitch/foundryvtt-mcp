@@ -67,6 +67,23 @@ describe('handleSearchActors', () => {
     expect(client.searchActors).toHaveBeenCalledWith({ query: 'gob', type: 'npc', limit: 5 });
   });
 
+  it('passes offset to the search and footers the page', async () => {
+    const searchResult: ActorSearchResult = {
+      actors: [buildActor({ _id: 'a3', name: 'Third' })],
+      total: 12,
+      page: 1,
+      limit: 10,
+    };
+    const client = {
+      searchActors: vi.fn().mockResolvedValue(searchResult),
+    } as unknown as FoundryClient;
+
+    const result = await handleSearchActors({ limit: 10, offset: 20 }, client);
+
+    expect(client.searchActors).toHaveBeenCalledWith({ query: '', limit: 10, offset: 20 });
+    expect(getText(result)).toContain('_Showing 21–21 of 12._');
+  });
+
   it('shows "No actors found" placeholder on empty result', async () => {
     const searchResult: ActorSearchResult = { actors: [], total: 0, page: 1, limit: 10 };
     const client = {

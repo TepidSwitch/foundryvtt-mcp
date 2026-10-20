@@ -22,6 +22,7 @@ export async function handleCanvasList(
     width?: number;
     height?: number;
     limit?: number;
+    offset?: number;
   },
   foundryClient: FoundryClient,
 ) {
@@ -34,6 +35,7 @@ export async function handleCanvasList(
           listWalls(g, {
             filter: args.filter,
             limit: args.limit,
+            offset: args.offset,
             area: hasArea
               ? {
                   x: args.x as number,
@@ -46,11 +48,11 @@ export async function handleCanvasList(
         );
       }
       case 'regions':
-        return text(listRegions(g, args.limit));
+        return text(listRegions(g, args.limit, args.offset));
       case 'tiles':
-        return text(listTiles(g, args.limit));
+        return text(listTiles(g, args.limit, args.offset));
       case 'drawings':
-        return text(listDrawings(g, args.limit));
+        return text(listDrawings(g, args.limit, args.offset));
     }
   });
 }

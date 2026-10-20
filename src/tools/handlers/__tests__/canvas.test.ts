@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { FoundryClient } from '../../../foundry/client.js';
 import { handleCanvasList } from '../canvas.js';
+import { pageSlice } from '../canvas-common.js';
 import { handleAddDrawing, handleRemoveDrawing, handleUpdateDrawing } from '../canvas-drawings.js';
 import { handleAddRegion, handleRemoveRegion, handleUpdateRegion } from '../canvas-regions.js';
 import { handleAddTile, handleRemoveTile, handleUpdateTile } from '../canvas-tiles.js';
@@ -453,5 +454,54 @@ describe('tiles and drawings', () => {
     expect(text(await handleCanvasList({ scene: 'Inn', kind: 'drawings' }, mock))).toContain(
       'rectangle at (0, 0) "Hatch"',
     );
+  });
+});
+
+describe('paging', () => {
+  it('slices a list into pages with a footer and next offset', () => {
+    const items = ['a', 'b', 'c', 'd', 'e'];
+    expect(pageSlice(items, 10)).toEqual({ items, footer: '' });
+    expect(pageSlice(items, 2)).toEqual({
+      items: ['a', 'b'],
+      footer: '\n_Showing 1–2 of 5; next offset=2._',
+    });
+    expect(pageSlice(items, 2, 2)).toEqual({
+      items: ['c', 'd'],
+      footer: '\n_Showing 3–4 of 5; next offset=4._',
+    });
+    expect(pageSlice(items, 2, 4)).toEqual({ items: ['e'], footer: '\n_Showing 5–5 of 5._' });
+    expect(pageSlice(items, 2, 9)).toEqual({
+      items: [],
+      footer: '\n_No entries at offset 9; 5 total._',
+    });
+    expect(pageSlice(items, 2, -3).items).toEqual(['a', 'b']);
+    expect(pageSlice(items, 2, 2.9).items).toEqual(['c', 'd']);
+  });
+
+  it('pages foundry_canvas list tiles with offset', async () => {
+    const tiles = Array.from({ length: 45 }, (_, i) => ({
+      _id: `TILE${String(i).padStart(12, '0')}`,
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 100,
+      texture: { src: `tree-${i}.png` },
+    }));
+    const mock = {
+      getWorldSnapshot: () => ({ scenes: [scene({ tiles })] }),
+    } as unknown as FoundryClient;
+
+    const first = text(await handleCanvasList({ scene: 'Inn', kind: 'tiles', limit: 20 }, mock));
+    expect(first).toContain('tree-0.png');
+    expect(first).not.toContain('tree-20.png');
+    expect(first).toContain('_Showing 1–20 of 45; next offset=20._');
+
+    const last = text(
+      await handleCanvasList({ scene: 'Inn', kind: 'tiles', limit: 20, offset: 40 }, mock),
+    );
+    expect(last).toContain('tree-44.png');
+    expect(last).not.toContain('tree-39.png');
+    expect(last).toContain('_Showing 41–45 of 45._');
+    expect(last).not.toContain('next offset');
   });
 });
