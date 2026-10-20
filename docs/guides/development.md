@@ -10,10 +10,12 @@ src/
 │   ├── client.ts        # FoundryVTT client with worldData cache
 │   └── types.ts         # TypeScript interfaces + WorldData
 ├── tools/
-│   ├── definitions.ts   # Tool schemas by category
-│   ├── router.ts        # Tool request routing
+│   ├── base.ts          # Shared tool types, toolset names
+│   ├── domain.ts        # DomainTool and action() declarations
+│   ├── registry.ts      # Filters tools by toolset and write mode
 │   ├── resources.ts     # MCP resource definitions
-│   └── handlers/        # Per-tool handler implementations
+│   ├── domains/         # One file per domain tool (schemas and actions)
+│   └── handlers/        # Per-action handler implementations
 ├── diagnostics/         # Optional REST API diagnostics
 ├── utils/               # Logger, cache utilities
 └── index.ts             # MCP server entry point
@@ -21,11 +23,15 @@ src/
 
 ## Adding New Tools
 
-1. Define tool schema in `src/tools/definitions.ts`
-2. Add handler in `src/tools/handlers/`
-3. Wire the handler in `src/tools/router.ts`
-4. Add TypeScript types in `src/foundry/types.ts` if needed
-5. Test with your AI assistant
+Tools are domains: one read tool (`foundry_<domain>`) or write tool (`foundry_<domain>_edit`), each with an `action` field. To add an action:
+
+1. Declare it with `action({ description, schema, run })` in `src/tools/domains/<domain>.ts`. See `src/tools/domain.ts`. `schema` is a Zod object for the arguments.
+2. Implement it in `src/tools/handlers/<file>.ts`, wrapped in `withToolError` (`src/tools/handlers/utils.ts`).
+3. Write through the client's `createDocuments`, `updateDocuments` or `deleteDocuments`. Those calls feed the audit log, undo and dry-run. A write that goes around them is not audited or undoable.
+4. If the action touches a new document type, add it to `TOP_LEVEL_COLLECTIONS` or `EMBEDDED_COLLECTIONS` in `src/foundry/world-cache.ts`, so the cache follows it.
+5. Add the action name to `ACTIONS` in `src/tools/__tests__/registry.test.ts`. For a new tool, also add it to `EXPECTED_SURFACE` there and to `ALL_DOMAIN_TOOLS` in `src/tools/domains/index.ts`.
+6. Add unit tests next to the handler, in `src/tools/handlers/__tests__/`.
+7. Test with your AI assistant
 
 ## Testing
 

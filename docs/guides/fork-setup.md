@@ -34,6 +34,26 @@ Or point anywhere with `FOUNDRY_ENV_FILE`. Variables already set in the Desktop
 config win over the file. On Linux the server warns on stderr if the file is
 readable by other users.
 
+## Dedicated MCP Foundry user
+
+The MCP server logs in to Foundry as a real user with `FOUNDRY_USERNAME` and `FOUNDRY_PASSWORD`. Give it its own account instead of reusing your GM login. Its actions are then attributed to that account in Foundry, and its password can be rotated without touching yours.
+
+Create the user in Foundry under Setup > Users (as a GM). Pick a role from the table below and set a password that is not used anywhere else.
+
+| Role | What it can do through the MCP | Tradeoff |
+|------|--------------------------------|----------|
+| Game Master | Everything the write tools do, plus GM-only settings, file upload, macro scripts and user management | Largest blast radius: a leaked password controls the whole world |
+| Assistant GM | Write tools for documents (actors, items, tokens, scenes, journals, chat) and file browsing. Settings outside a fixed list need the SETTINGS_MODIFY permission. Cannot create GM users or users with special permissions. File upload and macro scripts depend on the world's permission config | Smaller blast radius for everyday GM-assist work. Use this unless you need the GM-only operations |
+| Player or Trusted Player | Read-only use. Write tools are rejected | `foundry_diagnostics health` warns when `FOUNDRY_WRITE_ENABLED=true` with this role |
+
+Store the credentials for this account in the MCP config file, not in the Claude config:
+- Linux/macOS: `~/.config/foundryvtt-mcp/.env`
+- Windows: `%APPDATA%\foundryvtt-mcp\.env`
+
+Set `FOUNDRY_USERNAME` and `FOUNDRY_PASSWORD` to the dedicated account, and set `FOUNDRY_WRITE_ENABLED=true` only when you want the write tools active.
+
+To confirm the login role, run `foundry_diagnostics` with action `health`. The "Login Role" section shows the role and any warning or note for it.
+
 ## Claude Desktop config
 
 | OS | Config file |
@@ -67,10 +87,13 @@ after editing; closing the window is not enough.
 | --- | --- | --- |
 | `FOUNDRY_ENV_FILE` | auto | Secrets file path |
 | `FOUNDRY_DRY_RUN` | `false` | Log writes but send nothing; tool output carries a DRY RUN banner |
-| `FOUNDRY_TOOLSETS` | all but `canvas` and `script` | Comma-separated toolsets to expose: `actors`, `items`, `effects`, `scenes`, `tokens`, `combat`, `journals`, `compendium`, `audio`, `chat`, `world`, `files`, `generate`, `history`, `diagnostics`, `canvas`, `script`. Setting it replaces the default list, so name every toolset you want. Unknown names are ignored with a warning |
+| `FOUNDRY_TOOLSETS` | all but `canvas` and `script` (so `tables` is on) | Comma-separated toolsets to expose: `actors`, `items`, `effects`, `scenes`, `tokens`, `combat`, `journals`, `compendium`, `audio`, `chat`, `world`, `tables`, `files`, `generate`, `history`, `diagnostics`, `canvas`, `script`. Setting it replaces the default list, so name every toolset you want. Unknown names are ignored with a warning |
 | `COMFYUI_URL` | unset | Base URL of a ComfyUI server, e.g. `http://192.168.1.50:8188`. Turns on AI map generation (`foundry_generate_edit`); see [AI map generation](#ai-map-generation-optional) |
 | `COMFYUI_CHECKPOINT` | `dDBattlemapsSDXL10_upscaleV10.safetensors` | SDXL checkpoint file name, as ComfyUI lists it |
 | `COMFYUI_VAE` | `sdxl_vae.safetensors` | VAE file name, as ComfyUI lists it |
+| `COMFYUI_API_KEY` | unset | Key for a hosted or proxied ComfyUI. Sent as `Authorization: Bearer <key>`. The key is never logged |
+| `COMFYUI_AUTH_HEADER` | `Authorization` | Header that carries `COMFYUI_API_KEY`. Any header other than `Authorization` gets the raw key, with no `Bearer` prefix |
+| `COMFYUI_SCENE_FOLDER` | `Generated Maps` | Scene folder for generated maps, created when missing. The map `folder` argument overrides it |
 | `FOUNDRY_AUDIT_FILE` | state dir | JSONL write log path, or `off` for memory only. Default: `~/.local/state/foundryvtt-mcp/writes.jsonl` / `%APPDATA%\foundryvtt-mcp\writes.jsonl` |
 
 ## Tools
@@ -82,25 +105,32 @@ hidden, and refused if called, unless `FOUNDRY_WRITE_ENABLED=true`.
 
 | Toolset | Read tool (actions) | Write tool (actions) |
 | --- | --- | --- |
-| actors | `foundry_actors`: search, get, items, party, find_in_party, compare | `foundry_actors_edit`: update, set_ownership, import |
+| actors | `foundry_actors`: search, get, items, party, find_in_party, compare | `foundry_actors_edit`: update, set_ownership, import, request_rest, heal, damage, set_temp_hp |
 | items | `foundry_items`: search | `foundry_items_edit`: create, update, delete (world items); use (post an item card); add_to_actor, update_on_actor, remove_from_actor |
 | effects | | `foundry_effects_edit`: list, create, update, delete (actors and items); apply_status, remove_status |
-| scenes | `foundry_scenes`: search, get, suggest, image | `foundry_scenes_edit`: activate, update, add_note, remove_note, add_light, remove_light |
-| tokens | | `foundry_tokens_edit`: place, update, delete, move |
+| scenes | `foundry_scenes`: search, get, suggest, image | `foundry_scenes_edit`: activate, update, fit_grid, add_note, remove_note, add_light, remove_light |
+| tokens | | `foundry_tokens_edit`: place, place_group, place_encounter, update, delete, move |
 | combat | `foundry_combat`: state | `foundry_combat_edit`: start, next_turn, set_initiative, end |
 | journals | `foundry_journals`: search, get | `foundry_journals_edit`: create, add_page, append, replace_page, rename, delete, write_session_notes |
 | compendium | `foundry_compendium`: search, get, packs, roll_table | |
 | audio | `foundry_audio`: list | `foundry_audio_edit`: play, stop, create_playlist, add_sound, update, delete, set_scene_music |
 | chat | `foundry_chat`: read, roll | `foundry_chat_edit`: send, request_roll, draw_table |
-| world | `foundry_world`: summary, search, browse, users, refresh | `foundry_world_edit`: create_folder, move_to_folder |
+| world | `foundry_world`: summary, search, browse, users, refresh | `foundry_world_edit`: create_folder, move_to_folder, create_macro, update_macro, delete_macro |
+| tables | | `foundry_tables_edit`: create_table, update_table, add_results, remove_results, delete_table, reset_table |
 | canvas (off by default) | `foundry_canvas`: list | `foundry_canvas_edit`: add_walls, add_room, set_door, remove_walls, add_region, update_region, remove_region, add_tile, update_tile, remove_tile, add_drawing, update_drawing, remove_drawing |
 | script (off by default) | none | `foundry_script`: run |
 | files | `foundry_files`: browse | `foundry_files_edit`: mkdir, upload |
-| generate | `foundry_generate`: npc, loot, map_status, rule | `foundry_generate_edit`: map, cancel_map (needs `COMFYUI_URL`) |
+| generate | `foundry_generate`: npc, loot, encounter, map_status, rule | `foundry_generate_edit`: map, cancel_map (needs `COMFYUI_URL`) |
 | history | `foundry_history`: log | `foundry_history_edit`: undo |
 | diagnostics | `foundry_diagnostics`: health, system, search_logs, logs, diagnose | |
 
-That is 13 tools read-only and 24 with writes enabled (25 with `COMFYUI_URL` set, which adds `foundry_generate_edit`). The off-by-default toolsets add `foundry_canvas` and `foundry_canvas_edit` (`canvas`) and `foundry_script` (`script`, needs writes).
+That is 13 tools read-only and 26 with writes enabled (27 with `COMFYUI_URL` set, which adds `foundry_generate_edit`). The off-by-default toolsets add `foundry_canvas` (read) and `foundry_canvas_edit` (write) for `canvas`, and `foundry_script` (write only) for `script`. Counts are from the registry with the default toolsets.
+
+List actions for canvas, world browse, journal search, actor search, audio list and files browse take an `offset` argument. When more results remain, the footer says `next offset=<n>`; pass that number to get the next page.
+
+Roll tables: `foundry_tables_edit` changes the tables and their rows. `foundry_chat_edit draw_table` draws from them and honours `replacement: false`; `reset_table` makes drawn rows drawable again. Macros are managed with `foundry_world_edit` (`create_macro`, `update_macro`, `delete_macro`). The server never runs a macro. A script macro needs the MACRO_SCRIPT permission.
+
+Encounters: `foundry_generate encounter` proposes a set of monsters for the party by CR and XP budget. It creates nothing. `foundry_tokens_edit place_encounter` turns that output into imported actors, tokens and optionally combat, as one undo step.
 
 Positions for notes, lights and tokens are grid squares from the top-left of the map image. Roll requests and item cards post dnd5e inline enrichers (`[[/check ...]]`, `[[/save ...]]`, `[[/item ...]]`) that players click in chat; no Foundry module is needed.
 
