@@ -9,6 +9,7 @@ import axios, { type AxiosInstance, type AxiosRequestConfig, type AxiosResponse 
 import FormData from 'form-data';
 import { io, type Socket } from 'socket.io-client';
 import { z } from 'zod';
+import { assessRole } from '../diagnostics/role.js';
 import { logger } from '../utils/logger.js';
 import { authenticateFoundry, sessionSocketOptions } from './auth.js';
 import { evaluateDiceFormula } from './dice-formula.js';
@@ -349,6 +350,17 @@ export class FoundryClient {
       scenes: this.worldData.scenes.length,
       items: this.worldData.items.length,
     });
+    this.warnIfRoleCannotWrite();
+  }
+
+  /** Warns once per connect when writes are on but the login role cannot write. */
+  private warnIfRoleCannotWrite(): void {
+    const assessment = assessRole(this.getLoggedInRole(), this.isWriteEnabled());
+    for (const note of assessment?.notes ?? []) {
+      if (note.level === 'warn') {
+        logger.warn(note.text);
+      }
+    }
   }
 
   /**
@@ -602,6 +614,23 @@ export class FoundryClient {
   /** Id of the user this server is logged in as, or null before the first login. */
   getUserId(): string | null {
     return this.sessionUserId;
+  }
+
+  /**
+   * Role (CONST.USER_ROLES level) of the logged-in user, read from the world
+   * snapshot's user list. Null before login or when the user is not listed.
+   */
+  getLoggedInRole(): number | null {
+    const id = this.sessionUserId;
+    if (!id || !this.worldData) {
+      return null;
+    }
+    return this.worldData.users.find((u) => u._id === id)?.role ?? null;
+  }
+
+  /** Whether the FOUNDRY_WRITE_ENABLED opt-in is on. */
+  isWriteEnabled(): boolean {
+    return this.config.writeEnabled === true;
   }
 
   /** Id of the loaded world (the folder name under worlds/), or null before the first load. */

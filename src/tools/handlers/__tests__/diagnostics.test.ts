@@ -330,11 +330,18 @@ describe('handleGetSystemHealth', () => {
 });
 
 describe('handleGetHealthStatus', () => {
-  function worldClient(connected: boolean, stale = false): FoundryClient {
+  function worldClient(
+    connected: boolean,
+    stale = false,
+    role: number | null = 4,
+    writesEnabled = true,
+  ): FoundryClient {
     return {
       isConnected: () => connected,
       isWorldDataStale: () => stale,
       hasRestApi: () => true,
+      getLoggedInRole: () => role,
+      isWriteEnabled: () => writesEnabled,
       getWorldDataLoadedAt: () => null,
       getWorldInfo: vi.fn().mockResolvedValue({
         id: 'test-world',
@@ -367,6 +374,50 @@ describe('handleGetHealthStatus', () => {
     expect(text).not.toContain('N/A');
   });
 
+  it('shows the login role and a warning when writes will be rejected', async () => {
+    const text = getText(
+      await handleGetHealthStatus(
+        {},
+        worldClient(true, false, 1, true),
+        healthClient(makeHealth()),
+      ),
+    );
+    expect(text).toContain('**Login Role:**');
+    expect(text).toContain('- **Role:** Player');
+    expect(text).toContain('⚠️ Login is Player (role 1) and FOUNDRY_WRITE_ENABLED is true');
+  });
+
+  it('notes Assistant GM restrictions in the health report', async () => {
+    const text = getText(
+      await handleGetHealthStatus(
+        {},
+        worldClient(true, false, 3, true),
+        healthClient(makeHealth()),
+      ),
+    );
+    expect(text).toContain('- **Role:** Assistant GM');
+    expect(text).toContain('ℹ️ Foundry restricts some operations for Assistant GMs');
+    expect(text).not.toContain('⚠️ Login is');
+  });
+
+  it('notes that writes are off for a GM', async () => {
+    const text = getText(
+      await handleGetHealthStatus(
+        {},
+        worldClient(true, false, 4, false),
+        healthClient(makeHealth()),
+      ),
+    );
+    expect(text).toContain('ℹ️ Login is a Game Master, but FOUNDRY_WRITE_ENABLED is off');
+  });
+
+  it('omits the login role section when the role is unknown', async () => {
+    const text = getText(
+      await handleGetHealthStatus({}, worldClient(false, false, null), healthClient(makeHealth())),
+    );
+    expect(text).not.toContain('**Login Role:**');
+  });
+
   it('drops the unbacked CPU and playtime lines', async () => {
     const text = getText(
       await handleGetHealthStatus({}, worldClient(true), healthClient(makeHealth())),
@@ -392,6 +443,8 @@ describe('handleGetHealthStatus', () => {
     const failingWorld = {
       isConnected: () => false,
       isWorldDataStale: () => false,
+      getLoggedInRole: () => null,
+      isWriteEnabled: () => false,
       hasRestApi: () => true,
       getWorldDataLoadedAt: () => null,
       getWorldInfo: vi.fn().mockRejectedValue(new Error('not connected')),
@@ -443,6 +496,8 @@ describe('handleGetHealthStatus connection reporting', () => {
     const client = {
       isConnected: () => false,
       isWorldDataStale: () => false,
+      getLoggedInRole: () => null,
+      isWriteEnabled: () => false,
       hasRestApi: () => false,
       getWorldDataLoadedAt: () => null,
       getWorldInfo: async () => {
