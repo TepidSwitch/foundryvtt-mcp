@@ -66,6 +66,7 @@ export const TOOLSETS = [
   'audio',
   'chat',
   'world',
+  'tables',
   'files',
   'generate',
   'history',

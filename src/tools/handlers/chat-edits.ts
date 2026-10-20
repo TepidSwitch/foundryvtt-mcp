@@ -280,19 +280,29 @@ export async function handleDrawTable(
       'foundry_world browse kind="tables"',
     );
     const results = (Array.isArray(table.results) ? table.results : []).filter(isRec);
-    const rolled = rollFormula(str(table.formula));
+    const noReplacement = table.replacement === false;
+    const live = noReplacement ? results.filter((r) => r.drawn !== true) : results;
+    if (noReplacement && results.length > 0 && live.length === 0) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `Every result of "${str(table.name)}" has already been drawn (replacement is off). Use foundry_tables_edit reset_table to make them drawable again.`,
+      );
+    }
+    let rolled = rollFormula(str(table.formula));
     if (!rolled) {
       throw new McpError(
         ErrorCode.InvalidParams,
-        `Cannot roll "${str(table.formula)}" locally; use a table with a plain dice formula like 1d20`,
+        `Cannot roll "${str(table.formula)}" locally; supported: dice terms like 1d20, d100, 2d6+3, 1d8+1d6-2`,
       );
     }
-    const hit = results.find(
-      (r) =>
-        Array.isArray(r.range) &&
-        rolled.total >= num(r.range[0]) &&
-        rolled.total <= num(r.range[1]),
-    );
+    const covers = (r: Rec, total: number) =>
+      Array.isArray(r.range) && total >= num(r.range[0]) && total <= num(r.range[1]);
+    let hit = live.find((r) => covers(r, rolled?.total ?? 0));
+    // Like Foundry, re-roll when the roll lands on an already-drawn row.
+    for (let i = 0; !hit && noReplacement && i < 100; i++) {
+      rolled = rollFormula(str(table.formula)) ?? rolled;
+      hit = live.find((r) => covers(r, rolled?.total ?? 0));
+    }
     if (!hit) {
       throw new McpError(
         ErrorCode.InvalidParams,
@@ -302,8 +312,15 @@ export async function handleDrawTable(
     const html = `<h3>${escapeHtml(str(table.name))}</h3><p><strong>${escapeHtml(rolled.detail)} → ${rolled.total}</strong></p><p>${escapeHtml(rowText(hit))}</p>`;
     const { data } = buildMessage(foundryClient, html, args);
     const id = await post(foundryClient, data);
+    if (noReplacement && hit._id) {
+      await foundryClient.updateDocuments(
+        'TableResult',
+        [{ _id: str(hit._id), drawn: true }],
+        `RollTable.${str(table._id)}`,
+      );
+    }
     return text(
-      `🎲 **Drew from ${str(table.name)}**: ${rolled.detail} → **${rolled.total}**: ${rowText(hit)}\nPosted to chat, ${audience(args)}.\n**ID:** ${id}`,
+      `🎲 **Drew from ${str(table.name)}**: ${rolled.detail} → **${rolled.total}**: ${rowText(hit)}${noReplacement ? '\n(marked drawn)' : ''}\nPosted to chat, ${audience(args)}.\n**ID:** ${id}`,
     );
   });
 }
