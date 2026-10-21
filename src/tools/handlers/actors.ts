@@ -94,7 +94,7 @@ export async function handleGetActorDetails(
       return { content: [{ type: 'text', text: sheetFor(foundryClient, resolved) }] };
     }
 
-    // REST mode fallback: the module's actor summary.
+    // No snapshot loaded: getActor reports the missing world data.
     const actor = await foundryClient.getActor(actorId);
 
     const abilities = actor.abilities

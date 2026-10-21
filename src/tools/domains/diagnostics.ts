@@ -16,7 +16,6 @@ import {
 } from '../handlers/diagnostics.js';
 
 const level = z.enum(['debug', 'info', 'warn', 'error']).optional().describe('Log level filter');
-const REST_NOTE = 'Requires the REST API module (FOUNDRY_API_KEY); fails without it.';
 
 function diagnostics(ctx: ToolContext): DiagnosticsClient {
   if (!ctx.diagnosticsClient) {
@@ -42,7 +41,7 @@ export const diagnosticsTool = new DomainTool({
   actions: {
     health: action({
       description:
-        'Combined health report: connection state, world title/system/core version, server health (users, uptime, memory, recent errors). The world section is marked stale when the cache stopped following live changes (a dropped connection) - run foundry_world refresh. Sections needing the REST API module report as unavailable instead of failing. Answers even while disconnected.',
+        'Combined health report: connection state, world title/system/core version, server health (users, uptime, memory, recent errors). The world section is marked stale when the cache stopped following live changes (a dropped connection) - run foundry_world refresh. Answers even while disconnected.',
       schema: noArgs,
       run: async (_a, ctx) => {
         const result = await handleGetHealthStatus({}, ctx.foundryClient, diagnostics(ctx));
@@ -64,12 +63,12 @@ export const diagnosticsTool = new DomainTool({
       },
     }),
     system: action({
-      description: `Server health report: status (healthy/warning/critical), Foundry and system versions, world id, uptime, users and GMs, modules, clients, memory, log buffer and error rate. ${REST_NOTE}`,
+      description: `Server health report: status (healthy/warning/critical), Foundry and system versions, world id, uptime, users and GMs, modules, clients, memory, log buffer and error rate.`,
       schema: noArgs,
       run: (a, ctx) => handleGetSystemHealth(a, diagnostics(ctx)),
     }),
     search_logs: action({
-      description: `Search the server logs for a string. The match count is the server's total; limit caps how many are shown (default 50, max 1000). Levels info, warn and error work; "debug" is reported unsupported. ${REST_NOTE}`,
+      description: `Search the server logs for a string. The match count is the server's total; limit caps how many are shown (default 50, max 1000). Levels info, warn and error work; "debug" is reported unsupported.`,
       schema: z.object({
         query: z.string().describe('Text to look for'),
         level,
@@ -78,7 +77,7 @@ export const diagnosticsTool = new DomainTool({
       run: (a, ctx) => handleSearchLogs(a, diagnostics(ctx)),
     }),
     logs: action({
-      description: `Recent server log entries, optionally by level or since a timestamp. ${REST_NOTE}`,
+      description: `Recent server log entries, optionally by level or since a timestamp.`,
       schema: z.object({
         limit: z.number().min(1).max(100).optional().describe('Entries (default 20, max 100)'),
         level,

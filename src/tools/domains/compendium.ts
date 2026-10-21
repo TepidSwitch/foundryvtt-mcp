@@ -21,7 +21,7 @@ export const compendiumTool = new DomainTool({
   actions: {
     search: action({
       description:
-        'Search compendium packs by name (all packs unless filters.compendiumId scopes it). Returns pack id and entry id per hit. packType (Item, Actor, Scene, JournalEntry, RollTable) and itemType filters work everywhere; spellLevel and source only with the REST API module.',
+        'Search compendium packs by name (all packs unless filters.compendiumId scopes it). Returns pack id and entry id per hit. packType (Item, Actor, Scene, JournalEntry, RollTable) and itemType filters work.',
       schema: z.object({
         query: z.string().describe('Search text for entry names'),
         filters: z
@@ -32,8 +32,6 @@ export const compendiumTool = new DomainTool({
               .optional()
               .describe('Pack document type (Item, Actor, JournalEntry, ...)'),
             itemType: z.string().optional().describe('Item type (spell, weapon, feat, ...)'),
-            spellLevel: z.number().optional().describe('Spell level (REST API mode only)'),
-            source: z.string().optional().describe('Source/rules filter (REST API mode only)'),
           })
           .optional()
           .describe('Optional filters to narrow the search'),

@@ -49,7 +49,6 @@ const ConfigSchema = z.object({
           return false;
         }
       }, 'URL validation failed'),
-    apiKey: z.string().optional(),
     username: z.string().optional(),
     password: z.string().optional(),
     userId: z.string().optional(),
@@ -117,7 +116,6 @@ function loadConfig(): Config {
 
     foundry: {
       url: process.env.FOUNDRY_URL,
-      apiKey: process.env.FOUNDRY_API_KEY,
       username: process.env.FOUNDRY_USERNAME,
       password: process.env.FOUNDRY_PASSWORD,
       userId: process.env.FOUNDRY_USER_ID,
@@ -210,11 +208,7 @@ let _config: Config | null = null;
  * import { config } from './config/index.js';
  *
  * console.log(`Connecting to ${config.foundry.url}`);
- * if (config.foundry.apiKey) {
- *   console.log('Using local REST API module with API key');
- * } else {
- *   console.log('Using WebSocket connection with username/password');
- * }
+ * console.log('Using Socket.IO connection with username/password');
  * ```
  */
 export const config = new Proxy({} as Config, {

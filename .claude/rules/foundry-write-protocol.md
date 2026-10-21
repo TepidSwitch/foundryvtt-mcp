@@ -10,17 +10,14 @@ How the MCP server talks to FoundryVTT, and how to perform game-state
 mutations. Read this before adding any tool that reads or (especially) writes
 FoundryVTT documents.
 
-## Two transports — Socket.IO is primary
+## Transport — Socket.IO
 
 | Mode | Trigger | What it does |
 |------|---------|--------------|
 | **Socket.IO** (primary) | `FOUNDRY_USERNAME` + `FOUNDRY_PASSWORD` | Authenticates a real Foundry client session (4-step `/join` flow in `auth.ts`), connects to `FOUNDRY_URL` (`:30000`), and loads a read-only `worldData` snapshot. Reads are served from that cache. |
-| **REST / `apiKey`** (secondary) | `FOUNDRY_API_KEY` set | Hits `/api/*` on the REST module / bridge. Optional — per the README it powers "REST API diagnostics". May be extracted (`feat/extract-rest-api-module`). |
 
-`.env.example` states Socket.IO is the primary method and `FOUNDRY_API_KEY` is
-commented out. **Do not assume the bridge/REST path is in use** — default
-deployments are Socket.IO-only. The bridge repo (`foundryvtt-local-rest-api`)
-is local-only (no remote) with active WIP; treat it as out-of-scope.
+`.env.example` states Socket.IO is the only connection method; the REST bridge
+path (`FOUNDRY_API_KEY`) was removed.
 
 ## Writes use the core `modifyDocument` Socket.IO protocol
 
@@ -89,6 +86,6 @@ first, then smoke-test one round-trip against a live world.
 
 Compendium reads (`search_compendium`, compendium-source item create) use
 `CompendiumCollection.getDocuments` / the pack index — a separate socket path,
-not `modifyDocument`. Currently `search_compendium` stays on the REST path
-(graceful-empty without `apiKey`) and compendium-source create is rejected over
+not `modifyDocument`. `search_compendium` reads pack indexes over the socket and
+compendium-source create is rejected over
 Socket.IO. Design a pack-read path before adding compendium writes.

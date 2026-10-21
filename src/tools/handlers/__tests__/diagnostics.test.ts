@@ -339,7 +339,6 @@ describe('handleGetHealthStatus', () => {
     return {
       isConnected: () => connected,
       isWorldDataStale: () => stale,
-      hasRestApi: () => true,
       getLoggedInRole: () => role,
       isWriteEnabled: () => writesEnabled,
       getWorldDataLoadedAt: () => null,
@@ -429,7 +428,7 @@ describe('handleGetHealthStatus', () => {
 
   it('degrades gracefully when system health is unavailable', async () => {
     const failing = {
-      getSystemHealth: vi.fn().mockRejectedValue(new Error('no REST module')),
+      getSystemHealth: vi.fn().mockRejectedValue(new Error('diagnostics unavailable')),
     } as unknown as DiagnosticsClient;
 
     const text = getText(await handleGetHealthStatus({}, worldClient(false), failing));
@@ -445,7 +444,6 @@ describe('handleGetHealthStatus', () => {
       isWorldDataStale: () => false,
       getLoggedInRole: () => null,
       isWriteEnabled: () => false,
-      hasRestApi: () => true,
       getWorldDataLoadedAt: () => null,
       getWorldInfo: vi.fn().mockRejectedValue(new Error('not connected')),
     } as unknown as FoundryClient;
@@ -498,7 +496,6 @@ describe('handleGetHealthStatus connection reporting', () => {
       isWorldDataStale: () => false,
       getLoggedInRole: () => null,
       isWriteEnabled: () => false,
-      hasRestApi: () => false,
       getWorldDataLoadedAt: () => null,
       getWorldInfo: async () => {
         throw new Error('not connected');

@@ -6,7 +6,6 @@
  */
 
 import { config } from '../config/index.js';
-import { ApiStatusResponseSchema } from '../diagnostics/types.js';
 import type { FoundryClient } from '../foundry/client.js';
 import { logger } from './logger.js';
 
@@ -36,7 +35,7 @@ export interface HealthReport {
     details: string;
   };
   authentication: {
-    method: 'api-key' | 'credentials' | 'none';
+    method: 'credentials' | 'none';
     status: 'valid' | 'invalid' | 'untested';
     emoji: string;
   };
@@ -47,7 +46,6 @@ export interface HealthReport {
     sceneData: boolean;
     diagnostics: boolean;
   };
-  restApiAvailable: boolean;
   websocketAvailable: boolean;
 }
 
@@ -71,13 +69,6 @@ export class DiagnosticSystem {
 
       if (!isConnected) {
         return this.createConnectivityDiagnostic();
-      }
-
-      // Test REST API availability
-      const hasRestApi = await this.testRestApiAvailability();
-
-      if (!hasRestApi && this.requiresRestApi(feature)) {
-        return this.createRestApiDiagnostic(feature);
       }
 
       // Test authentication
@@ -111,7 +102,6 @@ export class DiagnosticSystem {
         sceneData: false,
         diagnostics: false,
       },
-      restApiAvailable: false,
       websocketAvailable: false,
     };
 
@@ -133,13 +123,10 @@ export class DiagnosticSystem {
         return report; // Early return if not connected
       }
 
-      // Test REST API
-      report.restApiAvailable = await this.testRestApiAvailability();
-
       // Test authentication
       const authResult = await this.testAuthentication();
       report.authentication = {
-        method: config.foundry.apiKey ? 'api-key' : 'credentials',
+        method: 'credentials',
         status: authResult.valid ? 'valid' : 'invalid',
         emoji: authResult.valid ? '✅' : '❌',
       };
@@ -149,16 +136,7 @@ export class DiagnosticSystem {
       report.features.actorSearch = await this.testActorSearch();
       report.features.itemSearch = await this.testItemSearch();
       report.features.sceneData = await this.testSceneData();
-      report.features.diagnostics = report.restApiAvailable;
-
-      // Update connectivity status based on feature availability
-      if (report.restApiAvailable) {
-        report.connectivity.status = 'connected';
-      } else if (report.features.diceRolling) {
-        report.connectivity.status = 'limited';
-        report.connectivity.emoji = '⚠️';
-        report.connectivity.details += ' (Limited functionality - REST API not available)';
-      }
+      report.features.diagnostics = true; // computed locally
     } catch (error) {
       logger.error('Health check failed:', error);
       report.connectivity = {
@@ -193,13 +171,6 @@ export class DiagnosticSystem {
     output += `  • Scene Data: ${report.features.sceneData ? '✅ Real data' : '⚠️ Mock data only'}\n`;
     output += `  • System Diagnostics: ${report.features.diagnostics ? '✅ Available' : '❌ Unavailable'}\n\n`;
 
-    if (!report.restApiAvailable) {
-      output += '💡 **Unlock Full Features**:\n';
-      output += '  → Install the "Foundry Local REST API" module in FoundryVTT\n';
-      output += '  → Enable the module and configure API key\n';
-      output += '  → See setup guide: https://github.com/laurigates/foundryvtt-mcp#setup\n\n';
-    }
-
     if (report.connectivity.status === 'offline') {
       output += '🔧 **Troubleshooting Steps**:\n';
       output += '  1. Ensure FoundryVTT is running and accessible\n';
@@ -230,44 +201,19 @@ export class DiagnosticSystem {
   }
 
   /**
-   * Create diagnostic for REST API issues
-   */
-  private createRestApiDiagnostic(feature: string): DiagnosticResult {
-    return {
-      explanation: `${feature.charAt(0).toUpperCase() + feature.slice(1)} search requires the REST API module for full functionality.`,
-      suggestions:
-        '• **Install REST API module** - Get it from the FoundryVTT module browser\n' +
-        "• **Enable the module** - Activate it in your world's module settings\n" +
-        '• **Configure API key** - Generate and copy the API key from module settings\n' +
-        '• **Update .env file** - Set FOUNDRY_API_KEY with your generated key\n' +
-        '• **Restart MCP server** - Restart to pick up the new configuration',
-      severity: 'warning',
-      canContinue: true,
-      documentationUrl:
-        'https://github.com/laurigates/foundryvtt-mcp/blob/main/SETUP_GUIDE.md#rest-api-setup',
-    };
-  }
-
-  /**
    * Create diagnostic for authentication issues
    */
   private createAuthenticationDiagnostic(_authResult: {
     valid: boolean;
     error?: string;
   }): DiagnosticResult {
-    const isApiKey = !!config.foundry.apiKey;
-
     return {
-      explanation: `Authentication failed using ${isApiKey ? 'API key' : 'username/password'}.`,
-      suggestions: isApiKey
-        ? "• **Check API key** - Verify the key is correct and hasn't expired\n" +
-          '• **Regenerate key** - Generate a new API key in FoundryVTT module settings\n' +
-          '• **Module status** - Ensure the REST API module is enabled and running\n' +
-          '• **Restart FoundryVTT** - Sometimes a restart resolves authentication issues'
-        : '• **Check credentials** - Verify username and password are correct\n' +
-          '• **User permissions** - Ensure the user has required permissions\n' +
-          '• **Case sensitivity** - Check for typos in username (case-sensitive)\n' +
-          '• **User status** - Make sure the user account is active',
+      explanation: 'Authentication failed using username/password.',
+      suggestions:
+        '• **Check credentials** - Verify username and password are correct\n' +
+        '• **User permissions** - Ensure the user has required permissions\n' +
+        '• **Case sensitivity** - Check for typos in username (case-sensitive)\n' +
+        '• **User status** - Make sure the user account is active',
       severity: 'error',
       canContinue: false,
       documentationUrl:
@@ -311,43 +257,13 @@ export class DiagnosticSystem {
   }
 
   /**
-   * Test if feature requires REST API
-   */
-  private requiresRestApi(feature: string): boolean {
-    return ['actors', 'items', 'diagnostics'].includes(feature);
-  }
-
-  /**
-   * Test REST API availability
-   */
-  private async testRestApiAvailability(): Promise<boolean> {
-    try {
-      const response = await this.foundryClient.get('/api/status');
-      return (
-        response?.data !== null &&
-        response?.data !== undefined &&
-        ApiStatusResponseSchema.parse(response.data).status === 'ok'
-      );
-    } catch (error) {
-      logger.debug('REST API not available:', error);
-      return false;
-    }
-  }
-
-  /**
    * Test authentication
    */
   private async testAuthentication(): Promise<{ valid: boolean; error?: string }> {
     try {
-      if (config.foundry.apiKey) {
-        // Test API key authentication
-        const response = await this.foundryClient.get('/api/world');
-        return { valid: !!response };
-      } else {
-        // Test credential authentication (via WebSocket)
-        await this.foundryClient.connect();
-        return { valid: this.foundryClient.isConnected() };
-      }
+      // Test credential authentication (via Socket.IO)
+      await this.foundryClient.connect();
+      return { valid: this.foundryClient.isConnected() };
     } catch (error) {
       return {
         valid: false,

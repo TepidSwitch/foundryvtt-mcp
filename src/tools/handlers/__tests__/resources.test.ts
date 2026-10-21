@@ -28,7 +28,7 @@ const makeUnsortedCombat = (overrides: Partial<WorldCombat> = {}): WorldCombat =
 
 const stubDiagnostics = () =>
   ({
-    getSystemHealth: vi.fn().mockRejectedValue(new Error('no REST')),
+    getSystemHealth: vi.fn().mockRejectedValue(new Error('diagnostics unavailable')),
   }) as unknown as DiagnosticsClient;
 
 /** Reads a resource and parses the single JSON content payload. */

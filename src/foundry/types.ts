@@ -570,9 +570,8 @@ export interface CompendiumSearchEntry {
 /**
  * Result envelope for a compendium search.
  *
- * `restAvailable` signals whether the REST API module (FOUNDRY_API_KEY) was
- * present. When false, `results` is empty and the handler surfaces a note
- * explaining that compendium search requires REST mode.
+ * `worldLoaded` is false when the world snapshot has not loaded yet; `results`
+ * is then empty and the handler says so.
  *
  * `nextCursor` carries the opaque pagination cursor for the following page
  * (an offset, base64-encoded); it is `null` when no further results exist.
@@ -582,7 +581,7 @@ export interface CompendiumSearchResult {
   total: number;
   page: number;
   limit: number;
-  restAvailable: boolean;
+  worldLoaded: boolean;
   nextCursor: string | null;
 }
 

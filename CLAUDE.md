@@ -46,16 +46,10 @@ bun run test-connection # Test MCP→FoundryVTT connection
 
 ### Authentication & transport selection
 
-`client.ts` selects transport purely by whether `FOUNDRY_API_KEY` is set:
-
-- **`FOUNDRY_API_KEY` unset → Socket.IO mode** (default): authenticates with
-  `FOUNDRY_USERNAME`/`FOUNDRY_PASSWORD` and loads full `worldData`.
-- **`FOUNDRY_API_KEY` set → REST API mode**: connects to the REST module's
-  `/api/status` instead. This is a transport **switch**, not an additive layer —
-  it does not run alongside the Socket.IO `worldData` path.
-- `USE_REST_MODULE` (seen in some `.env`/example files and the `test-connection`
-  tips) is **not read** by `src/config/index.ts` — it is a no-op. Transport is
-  decided solely by `apiKey` presence.
+`client.ts` talks to Foundry over Socket.IO only: it authenticates with
+`FOUNDRY_USERNAME`/`FOUNDRY_PASSWORD` (or `FOUNDRY_USER_ID`) and loads full
+`worldData`. The REST bridge (`FOUNDRY_API_KEY`) was removed; the variable is
+ignored with a startup warning. `USE_REST_MODULE` is likewise not read.
 
 ## Environment Variables
 
@@ -65,7 +59,6 @@ bun run test-connection # Test MCP→FoundryVTT connection
 | `FOUNDRY_USERNAME` | Yes | FoundryVTT user |
 | `FOUNDRY_PASSWORD` | Yes | FoundryVTT password |
 | `FOUNDRY_USER_ID` | No | Bypass username→ID resolution |
-| `FOUNDRY_API_KEY` | No | REST API module key (read-only diagnostics path) |
 | `FOUNDRY_WRITE_ENABLED` | No | Enable game-state mutations — `true` required for the write tools (default `false`) |
 | `LOG_LEVEL` | No | `debug` for verbose output |
 | `FOUNDRY_TIMEOUT` | No | Request timeout (ms, default 10000) |
@@ -99,7 +92,7 @@ Foundry and dnd5e client source for checking field names lives outside the repo 
 See `.claude/rules/` for detailed guidelines:
 - `development.md` — TDD workflow, commit conventions, build commands
 - `testing.md` — Test tiers (unit, integration, E2E) and requirements
-- `foundry-write-protocol.md` — transport (Socket.IO vs REST) and the `modifyDocument` write protocol
+- `foundry-write-protocol.md` — transport and the `modifyDocument` write protocol
 - `document-management.md` — Document detection and organization
 
 ## Reference

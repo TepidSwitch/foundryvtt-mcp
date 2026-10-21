@@ -187,10 +187,9 @@ describe('Actor mutation handlers', () => {
       ).rejects.toThrow(/Invalid actorId/);
     });
 
-    // In REST mode getActor returns the raw FoundryVTT document, so HP bounds
-    // live at system.attributes.hp — NOT the mapped top-level `hp`. These cases
-    // assert validation reads from the raw system shape (no socket cache).
-    it('rejects HP above max + temp (REST raw-document shape)', async () => {
+    // HP bounds live at system.attributes.hp in the raw document, not the mapped
+    // top-level `hp`. These cases assert validation reads from the raw system shape.
+    it('rejects HP above max + temp (raw-document shape)', async () => {
       const client = buildClient({
         actor: {
           _id: VALID_ID,
@@ -204,7 +203,7 @@ describe('Actor mutation handlers', () => {
       ).rejects.toThrow(/exceeds max \+ temp/);
     });
 
-    it('allows HP up to max + temp (REST raw-document shape)', async () => {
+    it('allows HP up to max + temp (raw-document shape)', async () => {
       const client = buildClient({
         actor: {
           _id: VALID_ID,

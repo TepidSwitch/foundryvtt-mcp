@@ -199,15 +199,15 @@ call does a full re-login. `foundry_diagnostics` (action `health`) shows connect
 login rejected, the last error with a plain-language hint, and how old the
 world data is.
 
-## Diagnostics without a Foundry module
+## Diagnostics
 
 `get_system_health`, `get_recent_logs`, `search_logs`, `diagnose_errors` and the
-system section of `get_health_status` work with no REST/diagnostics module
-(`FOUNDRY_API_KEY` unset). Health is computed from the world snapshot (version,
-system, users online, active modules, connection and staleness); the log tools
-read this MCP server's own recent log (logins, tool failures, write errors).
-Foundry's own server log, uptime and memory need a server module and are not
-available in this mode.
+system section of `get_health_status` need no Foundry module. Health is computed
+from the world snapshot (version, system, users online, active modules,
+connection and staleness); the log tools read this MCP server's own recent log
+(logins, tool failures, write errors). Foundry's own server log, uptime and
+memory are not available. The REST bridge and `FOUNDRY_API_KEY` were removed; a
+leftover `FOUNDRY_API_KEY` is ignored with a startup warning.
 
 ## Write safety
 

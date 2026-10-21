@@ -253,7 +253,7 @@ async function getSystemDiagnosticsResource(diagnosticsClient: DiagnosticsClient
           mimeType: 'application/json',
           text: JSON.stringify(
             {
-              message: 'Diagnostics require REST API module',
+              message: 'Diagnostics unavailable',
               lastUpdated: new Date().toISOString(),
             },
             null,

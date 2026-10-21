@@ -2,9 +2,8 @@
  * @fileoverview Compendium search tool handlers
  *
  * Read-only search across FoundryVTT compendium packs by name and metadata.
- * Compendium data is not part of the cached worldData snapshot, so this tool
- * requires the REST API module (FOUNDRY_API_KEY). Without it the search
- * returns gracefully empty and the handler explains why.
+ * Before the world snapshot has loaded the search returns empty and the
+ * handler says so.
  */
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
@@ -15,8 +14,6 @@ interface CompendiumFilters {
   compendiumId?: string;
   packType?: string;
   itemType?: string;
-  spellLevel?: number;
-  source?: string;
 }
 
 /**
@@ -56,12 +53,6 @@ export async function handleSearchCompendium(
     if (filters?.itemType) {
       params.itemType = filters.itemType;
     }
-    if (filters?.spellLevel !== undefined) {
-      params.spellLevel = filters.spellLevel;
-    }
-    if (filters?.source) {
-      params.source = filters.source;
-    }
 
     const result = await foundryClient.searchCompendium(params);
 
@@ -81,10 +72,9 @@ export async function handleSearchCompendium(
       })
       .join('\n');
 
-    const restNote =
-      result.restAvailable === false
-        ? '\n\n_Note: compendium search requires FOUNDRY_API_KEY (REST API module); returning no results._'
-        : '';
+    const notLoadedNote = result.worldLoaded
+      ? ''
+      : '\n\n_Note: world data has not loaded yet, so compendium packs are not searchable. Connect and retry._';
 
     const cursorNote = result.nextCursor
       ? `\n**Next page:** pass cursor \`${result.nextCursor}\` to retrieve more results.`
@@ -101,7 +91,7 @@ export async function handleSearchCompendium(
 
 ${entryList || 'No compendium entries found matching the criteria.'}
 
-**Page:** ${result.page} | **Limit:** ${result.limit}${cursorNote}${restNote}`,
+**Page:** ${result.page} | **Limit:** ${result.limit}${cursorNote}${notLoadedNote}`,
         },
       ],
     };

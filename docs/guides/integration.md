@@ -20,13 +20,7 @@ Add to your Claude Desktop MCP settings:
 }
 ```
 
-To enable optional diagnostics tools, add `FOUNDRY_API_KEY` to the `env` block:
-
-```json
-{
-  "FOUNDRY_API_KEY": "your_api_key_here"
-}
-```
+Diagnostics need no extra setup. (The old `FOUNDRY_API_KEY` REST bridge was removed and is ignored.)
 
 ## Custom MCP Client
 

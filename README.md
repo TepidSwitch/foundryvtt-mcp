@@ -15,7 +15,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that i
 - **Code mode** (opt-in) — sandboxed JavaScript for bulk edits, one undo for the whole run
 - **AI map generation** (opt-in) — through your own ComfyUI server
 - **Live connection** — Socket.IO loads the complete world state on connect
-- **Diagnostics** — optional server health monitoring (requires REST API module)
+- **Diagnostics** — server health from the world snapshot and this server's own log
 
 See [docs/guides/fork-setup.md](docs/guides/fork-setup.md) for the full tool table, every setting and Windows notes.
 
@@ -122,7 +122,6 @@ To configure manually, see the [Configuration Guide](docs/guides/configuration.m
 | `FOUNDRY_USERNAME` | Yes | FoundryVTT user account |
 | `FOUNDRY_PASSWORD` | Yes | FoundryVTT user password |
 | `FOUNDRY_USER_ID` | No | Bypass username-to-ID resolution |
-| `FOUNDRY_API_KEY` | No | REST API module key (enables diagnostics tools) |
 | `FOUNDRY_WRITE_ENABLED` | No | Enable game-state mutations — `true` required for the write tools (default: `false`) |
 | `FOUNDRY_TOOLSETS` | No | Comma-separated toolsets to expose (default: all except `canvas` and `script`) |
 | `FOUNDRY_DRY_RUN` | No | `true` logs writes without sending them |
@@ -177,7 +176,7 @@ Action lists for the opt-in and smaller tools are in [docs/guides/fork-setup.md]
 - `foundry://combat` — active combat; `combatants` are in initiative order, so `combat.turn` indexes them directly
 - `foundry://world/settings` — world and campaign settings
 - `foundry://script-api.d.ts` — declarations for the `foundry_script` sandbox API
-- `foundry://system/diagnostics` — requires REST API module
+- `foundry://system/diagnostics` — health computed from the world snapshot and the MCP log
 
 ## Troubleshooting
 

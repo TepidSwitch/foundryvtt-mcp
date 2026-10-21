@@ -21,7 +21,6 @@ cp .env.example .env
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `FOUNDRY_USER_ID` | — | 16-char document `_id` (bypasses username resolution) |
-| `FOUNDRY_API_KEY` | — | REST API module key (enables 5 diagnostics tools) |
 | `LOG_LEVEL` | `info` | Logging verbosity (`debug`, `info`, `warn`, `error`) |
 | `NODE_ENV` | `development` | Environment mode |
 | `FOUNDRY_TIMEOUT` | `10000` | Request timeout in ms |
@@ -75,14 +74,6 @@ Your FoundryVTT user needs:
 - Access compendium data
 - Use dice rolling API
 
-### Optional: Diagnostics Tools
+### Diagnostics
 
-Installing the **Foundry Local REST API** module adds 5 server monitoring tools (`get_recent_logs`, `search_logs`, `get_system_health`, `diagnose_errors`, `get_health_status`):
-
-1. In FoundryVTT: **Setup** > **Add-on Modules** > **Install Module**
-2. Paste: `https://github.com/laurigates/foundryvtt-mcp/releases/latest/download/module.json`
-3. Enable the module in your world and copy the generated API key
-4. Add to `.env`:
-   ```env
-   FOUNDRY_API_KEY=your_api_key_here
-   ```
+The diagnostics tools (`foundry_diagnostics`) need no Foundry module: health comes from the world snapshot and the log tools read this server's own log. The old REST bridge and `FOUNDRY_API_KEY` were removed; a leftover `FOUNDRY_API_KEY` is ignored with a startup warning.
