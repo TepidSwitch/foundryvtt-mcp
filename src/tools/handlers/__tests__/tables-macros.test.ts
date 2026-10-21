@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { FoundryClient } from '../../../foundry/client.js';
 import type { WorldData } from '../../../foundry/types.js';
 import { findCachedDocuments } from '../../../foundry/world-cache.js';
+import { fakeFoundry } from '../../../test-utils/fake-foundry.js';
 import { handleDrawTable } from '../chat-edits.js';
 import { handleCreateMacro, handleDeleteMacro, handleUpdateMacro } from '../macros.js';
 import {
@@ -18,37 +18,32 @@ const T = 'TABLEAAAAAAAAAAA';
 const R1 = 'RESULT1AAAAAAAAA';
 const R2 = 'RESULT2AAAAAAAAA';
 
-function client(opts: { replacement?: boolean; drawn?: string[] } = {}) {
-  const snapshot = {
-    folders: [{ _id: 'TFOLDERAAAAAAAAA', name: 'Loot', type: 'RollTable' }],
-    tables: [
-      {
-        _id: T,
-        name: 'Wild Magic',
-        formula: '1d4',
-        replacement: opts.replacement ?? true,
-        results: [
-          { _id: R1, range: [1, 2], name: 'Sparkles', drawn: opts.drawn?.includes(R1) ?? false },
-          { _id: R2, range: [3, 4], name: 'Frogs', drawn: opts.drawn?.includes(R2) ?? false },
-        ],
-      },
-    ],
-    macros: [{ _id: 'MACROAAAAAAAAAAA', name: 'Rest', type: 'chat' }],
-  };
-  const m = {
-    createDocuments: vi.fn(async () => [{ _id: 'NEWAAAAAAAAAAAAA' }]),
-    updateDocuments: vi.fn(async () => []),
-    deleteDocuments: vi.fn(async () => []),
-  };
-  return {
-    mock: {
-      getWorldSnapshot: () => snapshot,
-      getUserId: () => 'USERGMAAAAAAAAAA',
-      ...m,
-    } as unknown as FoundryClient,
-    ...m,
-  };
+type Row = Record<string, unknown>;
+
+function setup(opts: { replacement?: boolean; drawn?: string[] } = {}) {
+  return fakeFoundry({
+    world: {
+      folders: [{ _id: 'TFOLDERAAAAAAAAA', name: 'Loot', type: 'RollTable' }],
+      tables: [
+        {
+          _id: T,
+          name: 'Wild Magic',
+          formula: '1d4',
+          replacement: opts.replacement ?? true,
+          results: [
+            { _id: R1, range: [1, 2], name: 'Sparkles', drawn: opts.drawn?.includes(R1) ?? false },
+            { _id: R2, range: [3, 4], name: 'Frogs', drawn: opts.drawn?.includes(R2) ?? false },
+          ],
+        },
+      ],
+      macros: [{ _id: 'MACROAAAAAAAAAAA', name: 'Rest', type: 'chat' }],
+    },
+  });
 }
+type Fake = ReturnType<typeof setup>;
+const table = (f: Fake) => f.world.tables?.find((t) => t._id === T) as Row;
+const results = (f: Fake) => table(f).results as Row[];
+const writes = (f: Fake) => f.sent.filter((s) => s.action !== 'get');
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -70,7 +65,7 @@ describe('rollFormula', () => {
 
 describe('table writes', () => {
   it('creates a table deriving the formula from the ranges', async () => {
-    const { mock, createDocuments } = client();
+    const f = setup();
     await handleCreateTable(
       {
         name: 'Loot',
@@ -81,18 +76,16 @@ describe('table writes', () => {
           { text: 'Ring' },
         ],
       },
-      mock,
+      f.client,
     );
-    const data = (createDocuments.mock.calls[0] as unknown[][])[1] as Array<
-      Record<string, unknown>
-    >;
-    expect(data[0]?.formula).toBe('1d13');
-    expect(data[0]?.folder).toBe('TFOLDERAAAAAAAAA');
-    expect((data[0]?.results as Array<{ range: number[] }>)?.[2]?.range).toEqual([13, 13]);
+    const created = f.world.tables?.find((t) => t.name === 'Loot') as Row;
+    expect(created.formula).toBe('1d13');
+    expect(created.folder).toBe('TFOLDERAAAAAAAAA');
+    expect((created.results as Array<{ range: number[] }>)[2]?.range).toEqual([13, 13]);
   });
 
   it('rejects overlapping ranges', async () => {
-    const { mock, createDocuments } = client();
+    const f = setup();
     await expect(
       handleCreateTable(
         {
@@ -102,87 +95,87 @@ describe('table writes', () => {
             { text: 'b', range: [5, 6] },
           ],
         },
-        mock,
+        f.client,
       ),
     ).rejects.toThrow(/overlap/);
-    expect(createDocuments).not.toHaveBeenCalled();
+    expect(writes(f)).toEqual([]);
   });
 
   it('adds results after the existing ones, widens the formula, and rejects overlaps', async () => {
-    const { mock, createDocuments, updateDocuments } = client();
-    await handleAddResults({ table: 'wild', results: [{ text: 'Owl' }] }, mock);
-    expect(createDocuments).toHaveBeenCalledWith(
-      'TableResult',
-      [expect.objectContaining({ range: [5, 5], name: 'Owl' })],
-      `RollTable.${T}`,
-    );
-    expect(updateDocuments).toHaveBeenCalledWith('RollTable', [{ _id: T, formula: '1d5' }]);
+    const f = setup();
+    await handleAddResults({ table: 'wild', results: [{ text: 'Owl' }] }, f.client);
+    expect(results(f).at(-1)).toMatchObject({ range: [5, 5], name: 'Owl' });
+    expect(table(f).formula).toBe('1d5');
     await expect(
-      handleAddResults({ table: 'wild', results: [{ text: 'x', range: [2, 3] }] }, mock),
+      handleAddResults({ table: 'wild', results: [{ text: 'x', range: [2, 3] }] }, f.client),
     ).rejects.toThrow(/overlap/);
+    expect(results(f)).toHaveLength(3);
   });
 
-  it('updates, removes, deletes and resets', async () => {
-    const { mock, updateDocuments, deleteDocuments } = client({ replacement: false, drawn: [R1] });
-    await handleUpdateTable({ table: 'wild', replacement: true }, mock);
-    expect(updateDocuments).toHaveBeenLastCalledWith('RollTable', [{ _id: T, replacement: true }]);
-    await expect(handleUpdateTable({ table: 'wild' }, mock)).rejects.toThrow(/Nothing to update/);
-    await handleRemoveResults({ table: 'wild', results: [R2] }, mock);
-    expect(deleteDocuments).toHaveBeenLastCalledWith('TableResult', [R2], `RollTable.${T}`);
-    await expect(
-      handleRemoveResults({ table: 'wild', results: ['NOPEAAAAAAAAAAAA'] }, mock),
-    ).rejects.toThrow(/No result/);
-    await handleResetTable({ table: 'wild' }, mock);
-    expect(updateDocuments).toHaveBeenLastCalledWith(
-      'TableResult',
-      [{ _id: R1, drawn: false }],
-      `RollTable.${T}`,
+  it('updates a table and rejects an empty update', async () => {
+    const f = setup({ replacement: false });
+    await handleUpdateTable({ table: 'wild', replacement: true }, f.client);
+    expect(table(f).replacement).toBe(true);
+    await expect(handleUpdateTable({ table: 'wild' }, f.client)).rejects.toThrow(
+      /Nothing to update/,
     );
-    await handleDeleteTable({ table: 'wild' }, mock);
-    expect(deleteDocuments).toHaveBeenLastCalledWith('RollTable', [T]);
+  });
+
+  it('removes results, rejecting unknown ids', async () => {
+    const f = setup();
+    await handleRemoveResults({ table: 'wild', results: [R2] }, f.client);
+    expect(results(f).map((r) => r._id)).toEqual([R1]);
+    await expect(
+      handleRemoveResults({ table: 'wild', results: ['NOPEAAAAAAAAAAAA'] }, f.client),
+    ).rejects.toThrow(/No result/);
+  });
+
+  it('resets drawn flags, then deletes the table', async () => {
+    const f = setup({ replacement: false, drawn: [R1] });
+    await handleResetTable({ table: 'wild' }, f.client);
+    expect(results(f).map((r) => r.drawn)).toEqual([false, false]);
+    await handleDeleteTable({ table: 'wild' }, f.client);
+    expect(f.world.tables).toEqual([]);
   });
 });
 
 describe('draw_table without replacement', () => {
   it('marks the drawn row and skips already drawn rows', async () => {
-    const { mock, updateDocuments } = client({ replacement: false, drawn: [R1] });
+    const f = setup({ replacement: false, drawn: [R1] });
     const seq = [0, 0.99]; // first roll lands on the drawn row
     vi.spyOn(Math, 'random').mockImplementation(() => seq.shift() ?? 0.99);
-    const out = (await handleDrawTable({ table: 'wild' }, mock)).content[0] as { text: string };
+    const out = (await handleDrawTable({ table: 'wild' }, f.client)).content[0] as { text: string };
     expect(out.text).toContain('Frogs');
-    expect(updateDocuments).toHaveBeenCalledWith(
-      'TableResult',
-      [{ _id: R2, drawn: true }],
-      `RollTable.${T}`,
-    );
+    expect(results(f).map((r) => r.drawn)).toEqual([true, true]);
   });
 
   it('suggests reset_table when everything is drawn', async () => {
-    const { mock } = client({ replacement: false, drawn: [R1, R2] });
-    await expect(handleDrawTable({ table: 'wild' }, mock)).rejects.toThrow(/reset_table/);
+    const f = setup({ replacement: false, drawn: [R1, R2] });
+    await expect(handleDrawTable({ table: 'wild' }, f.client)).rejects.toThrow(/reset_table/);
   });
 
   it('does not mark anything when replacement is on', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0);
-    const { mock, updateDocuments } = client();
-    await handleDrawTable({ table: 'wild' }, mock);
-    expect(updateDocuments).not.toHaveBeenCalled();
+    const f = setup();
+    await handleDrawTable({ table: 'wild' }, f.client);
+    expect(results(f).map((r) => r.drawn)).toEqual([false, false]);
+    expect(writes(f).filter((w) => w.type === 'TableResult')).toEqual([]);
   });
 });
 
 describe('macro writes', () => {
   it('creates, updates and deletes', async () => {
-    const { mock, createDocuments, updateDocuments, deleteDocuments } = client();
-    await handleCreateMacro({ name: 'Hi', type: 'chat', command: 'hello' }, mock);
-    expect(createDocuments).toHaveBeenCalledWith('Macro', [
-      { name: 'Hi', type: 'chat', command: 'hello', scope: 'global' },
-    ]);
-    await handleUpdateMacro({ macro: 'rest', command: 'x' }, mock);
-    expect(updateDocuments).toHaveBeenCalledWith('Macro', [
-      { _id: 'MACROAAAAAAAAAAA', command: 'x' },
-    ]);
-    await handleDeleteMacro({ macro: 'rest' }, mock);
-    expect(deleteDocuments).toHaveBeenCalledWith('Macro', ['MACROAAAAAAAAAAA']);
+    const f = setup();
+    await handleCreateMacro({ name: 'Hi', type: 'chat', command: 'hello' }, f.client);
+    expect(f.world.macros?.find((m) => m.name === 'Hi')).toMatchObject({
+      type: 'chat',
+      command: 'hello',
+      scope: 'global',
+    });
+    await handleUpdateMacro({ macro: 'rest', command: 'x' }, f.client);
+    expect(f.world.macros?.find((m) => m._id === 'MACROAAAAAAAAAAA')?.command).toBe('x');
+    await handleDeleteMacro({ macro: 'rest' }, f.client);
+    expect(f.world.macros?.map((m) => m.name)).toEqual(['Hi']);
   });
 });
 

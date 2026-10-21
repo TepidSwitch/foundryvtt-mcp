@@ -39,6 +39,8 @@ const SNAPSHOT_TYPES = ['Actor', 'Scene', 'RollTable', 'Macro', 'Combat', 'Folde
 interface Snapshot {
   docs: DocRef[];
   activeCombats: string[];
+  /** Chat log size (too many messages to list under the 200-row cap). */
+  messageCount: number;
 }
 
 interface State {
@@ -111,7 +113,11 @@ async function takeSnapshot(s: McpSession): Promise<Snapshot> {
       rows.push({ type, id, name, active });
     }
   }
+  const summary = await s.call('foundry_world', { action: 'summary' });
+  const messages = /\*\*messages\*\*: (\d+)/.exec(summary.text);
+  if (!messages?.[1]) throw new Error(`no message count in world summary: ${summary.text.slice(0, 200)}`);
   return {
+    messageCount: Number(messages[1]),
     docs: rows.map(({ type, id, name }) => ({ type, id, name })),
     activeCombats: rows.filter((r) => r.type === 'Combat' && r.active).map((r) => r.id),
   };
@@ -253,6 +259,51 @@ return { token: t ?? null, actor: a ?? null };`,
     },
   },
   {
+    name: 'undo_hp',
+    desc: 'damage 3 on the token, undo that write, fresh session sees the HP from before',
+    requires: ['hp_persisted'],
+    run: async (ctx) => {
+      const readHp = async (): Promise<number | undefined> => {
+        const fresh = await ctx.freshSession();
+        try {
+          const res = await fresh.call('foundry_script', {
+            action: 'run',
+            dry_run: false,
+            code: `const s = await foundry.get('Scene', ${JSON.stringify(ctx.st.sceneId)});
+const list = Array.isArray(s.tokens) ? s.tokens : Object.values(s.tokens ?? {});
+const t = list.find(t => (t.id ?? t._id) === ${JSON.stringify(ctx.st.tokenId)});
+return { token: t ?? null };`,
+          });
+          assert(!res.isError, `fresh read failed: ${res.text.slice(0, 300)}`);
+          const { token } = parseScriptResult<{ token: unknown }>(res.text);
+          return extractHp(token)?.value;
+        } finally {
+          fresh.close();
+        }
+      };
+      const target = ctx.st.tokenId as string;
+      assert(ctx.st.owned.has(target), 'token is not owned by this run');
+      const before = await readHp();
+      assert(typeof before === 'number', 'no token hp before the damage');
+      await ctx.ok('foundry_actors_edit', {
+        action: 'damage',
+        amount: 3,
+        target,
+        sceneId: ctx.st.sceneId,
+      });
+      const log = await ctx.s.call('foundry_history', { action: 'log', limit: 20 });
+      assert(!log.isError, `history log failed: ${log.text.slice(0, 300)}`);
+      const write = parseWriteLog(log.text).find(
+        (e) => e.type === 'ActorDelta' && e.action === 'update' && !e.undone && !e.undoOf,
+      );
+      assert(write, 'the damage write (ActorDelta update) is not in the history log');
+      await ctx.ok('foundry_history_edit', { action: 'undo', write_id: write?.id });
+      const after = await readHp();
+      assert(after === before, `hp after undo is ${after}, expected ${before}`);
+      return `hp ${before} restored after undoing ${write?.id}`;
+    },
+  },
+  {
     name: 'request_rest',
     desc: 'actors_edit request_rest for the test actor',
     requires: ['create_actor'],
@@ -323,7 +374,7 @@ return { token: t ?? null, actor: a ?? null };`,
     name: 'encounter',
     desc: 'generate encounter (read-only) finds monsters',
     run: async (ctx) => {
-      const r = await ctx.ok('foundry_generate', { action: 'encounter', difficulty: 'moderate' });
+      const r = await ctx.ok('foundry_generate', { action: 'encounter', difficulty: 'moderate', seed: 1 });
       const creatures = extractCreatures(r.text);
       assert(creatures.length > 0, `no creatures in encounter output: ${r.text.slice(0, 300)}`);
       ctx.st.creatures = creatures;
@@ -346,7 +397,9 @@ return { token: t ?? null, actor: a ?? null };`,
         action: 'place_encounter',
         scene: ctx.st.sceneId,
         creatures: two,
-        area: { x: 5, y: 0, width: 5, height: 4 },
+        // Right of the place_group token; big enough for a Gargantuan (4×4) boss.
+        area: { x: 4, y: 0, width: 6, height: 8 },
+        spacing: 0,
         start_combat: true,
       });
       ctx.st.encounterPlaced = true;
@@ -437,7 +490,7 @@ async function main(): Promise<number> {
       return 2;
     }
     baseline = await baselineLog(s);
-    say(`\nBaseline: ${before.docs.length} docs, ${before.activeCombats.length} active combat(s).\n`);
+    say(`\nBaseline: ${before.docs.length} docs, ${before.activeCombats.length} active combat(s), ${before.messageCount} chat messages.\n`);
 
     const failed = new Set<string>();
     for (const step of STEPS.filter((x) => selected.includes(x.name))) {
@@ -549,19 +602,22 @@ return out;`,
     const combatBefore = before.docs.filter((d) => d.type === 'Combat').map((d) => d.id).sort().join(',');
     const combatAfter = after.docs.filter((d) => d.type === 'Combat').map((d) => d.id).sort().join(',');
     if (combatBefore !== combatAfter) failures.push('Combat id set differs from before the run');
+    if (after.messageCount !== before.messageCount) {
+      const unparsed = st.unparsedChat.length > 0 ? ` (no id printed for: ${st.unparsedChat.join('; ')})` : '';
+      failures.push(
+        `chat log has ${after.messageCount} messages, ${before.messageCount} before the run${unparsed}`,
+      );
+    }
   }
   const search = await s.call('foundry_world', { action: 'search', query: TEST_PREFIX });
   if (search.text.includes(TEST_NAME)) failures.push(`world search still finds test docs:\n${search.text}`);
 
-  if (st.unparsedChat.length > 0) {
-    say(`  note: chat messages whose ids were not printed may remain in the chat log (${st.unparsedChat.join('; ')})`);
-  }
   if (failures.length > 0) {
     clean = false;
     console.error('\nCLEANUP INCOMPLETE. A human must check/delete:');
     for (const f of failures) console.error(`  - ${f}`);
   } else {
-    say('  world is back to the baseline (docs, combats, search clean)');
+    say('  world is back to the baseline (docs, combats, chat count, search clean)');
   }
   return clean;
 }

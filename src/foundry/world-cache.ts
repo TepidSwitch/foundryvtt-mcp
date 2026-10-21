@@ -196,8 +196,31 @@ function mergePatch(target: Record<string, unknown>, patch: Record<string, unkno
       mergePatch(target[key] as Record<string, unknown>, value);
       continue;
     }
+    const current = target[key];
+    if (
+      Array.isArray(value) &&
+      Array.isArray(current) &&
+      value.length > 0 &&
+      isIdRecordArray(value) &&
+      isIdRecordArray(current)
+    ) {
+      // A parent update carrying partial embedded docs (a playlist update with
+      // `sounds: [{_id, playing}]`) merges by `_id`; replacing the array would
+      // wipe the other fields (names, paths) of those embedded docs.
+      for (const part of value) {
+        const existing = current.find((d) => d._id === part._id);
+        if (existing) {
+          mergePatch(existing, part);
+        }
+      }
+      continue;
+    }
     target[key] = value;
   }
+}
+
+function isIdRecordArray(arr: unknown[]): arr is Array<Record<string, unknown>> {
+  return arr.every((e) => isRecord(e) && typeof e._id === 'string');
 }
 
 /**
@@ -497,6 +520,20 @@ export function findCachedDocuments(
   ids: string[],
   parentUuid?: string,
 ): Array<Record<string, unknown>> {
+  // An unlinked token's ActorDelta is the token's own `delta` (parent
+  // `Scene.<sid>.Token.<tid>`, `_id` = token id), not an array element.
+  const deltaParent = /^Scene\.([^.]+)\.Token\.([^.]+)$/.exec(parentUuid ?? '');
+  if (type === 'ActorDelta' && deltaParent) {
+    const scene = worldData.scenes.find((sc) => sc._id === deltaParent[1]);
+    const token = (
+      scene as unknown as { tokens?: Array<Record<string, unknown>> } | undefined
+    )?.tokens?.find((t) => t._id === deltaParent[2]);
+    if (!token || !ids.includes(deltaParent[2] as string)) {
+      return [];
+    }
+    const delta = isRecord(token.delta) ? structuredClone(token.delta) : {};
+    return [{ ...delta, _id: deltaParent[2] }];
+  }
   let collection: unknown;
   if (parentUuid) {
     const resolved = resolveParent(worldData, parentUuid);
