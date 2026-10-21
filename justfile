@@ -149,6 +149,12 @@ qa: lint check-types test
 live-check *args:
     npx tsx scripts/live-check.ts {{ args }}
 
+# Live smoke suite: WRITES to the real world (only "MCP TEST — delete me" docs, undone after). Needs --yes, e.g. `just smoke-live --yes --only tables`
+[group: "quality"]
+smoke-live *args:
+    npm run build
+    npx tsx scripts/live-smoke.ts "$@"
+
 ########## Documentation ##########
 
 # Generate TypeDoc documentation
