@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
-import type { FoundryClient } from '../../../foundry/client.js';
+import { describe, expect, it } from 'vitest';
+import { fakeFoundry } from '../../../test-utils/fake-foundry.js';
 import { handleCanvasList } from '../canvas.js';
 import { pageSlice } from '../canvas-common.js';
 import { handleAddDrawing, handleRemoveDrawing, handleUpdateDrawing } from '../canvas-drawings.js';
@@ -81,27 +81,19 @@ function scene(over: Record<string, unknown> = {}) {
   };
 }
 
-function client() {
-  const calls = {
-    createDocuments: vi.fn(async (_t: string, data: unknown[]) =>
-      data.map((_, i) => ({ _id: `NEWAAAAAAAAAAAA${i}` })),
-    ),
-    updateDocuments: vi.fn(async () => []),
-    deleteDocuments: vi.fn(async () => []),
-  };
-  return {
-    mock: {
-      getWorldSnapshot: () => ({ scenes: [scene()] }),
-      getUserId: () => 'USERGMAAAAAAAAAA',
-      ...calls,
-    } as unknown as FoundryClient,
-    ...calls,
-  };
+type Row = Record<string, unknown>;
+
+/** Fake socket over one scene; `f.world` is the server's truth. */
+function setup(over: Row = {}) {
+  const f = fakeFoundry({ world: { scenes: [scene(over)] } });
+  const list = (field: string) => (f.world.scenes?.[0]?.[field] as Row[]) ?? [];
+  const writes = () => f.sent.filter((s) => s.action !== 'get');
+  return { ...f, mock: f.client, list, writes };
 }
 
 describe('walls', () => {
   it('converts grid squares to integer canvas pixels with the scene origin', async () => {
-    const { mock, createDocuments } = client();
+    const { mock, list } = setup();
     await handleAddWalls(
       {
         scene: 'Inn',
@@ -112,14 +104,12 @@ describe('walls', () => {
       },
       mock,
     );
-    expect(createDocuments).toHaveBeenCalledWith(
-      'Wall',
-      [
-        { c: [500, 400, 800, 400], move: 20, sight: 20, light: 20, sound: 20, door: 0 },
-        { c: [800, 400, 800, 650], move: 20, sight: 20, light: 20, sound: 20, door: 2, ds: 2 },
-      ],
-      `Scene.${SCENE}`,
-    );
+    const added = list('walls').slice(3);
+    expect(added).toMatchObject([
+      { c: [500, 400, 800, 400], move: 20, sight: 20, light: 20, sound: 20, door: 0 },
+      { c: [800, 400, 800, 650], move: 20, sight: 20, light: 20, sound: 20, door: 2, ds: 2 },
+    ]);
+    expect(added.every((w) => typeof w._id === 'string')).toBe(true);
   });
 
   it('rejects points off the map, zero-length walls and a state on a plain wall', () => {
@@ -163,7 +153,7 @@ describe('walls', () => {
     expect(split.filter((w) => w.kind === 'door')).toEqual([
       { x1: 4, y1: 4, x2: 5, y2: 4, kind: 'door' },
     ]);
-    const { mock, createDocuments } = client();
+    const { mock, list, writes } = setup();
     await handleAddRoom(
       {
         scene: 'Inn',
@@ -177,40 +167,38 @@ describe('walls', () => {
       },
       mock,
     );
-    expect(createDocuments).toHaveBeenCalledTimes(1);
-    expect((createDocuments.mock.calls[0]?.[1] as unknown[] | undefined)?.length).toBe(6);
+    expect(writes()).toHaveLength(1);
+    const added = list('walls').slice(3);
+    expect(added).toHaveLength(6);
+    expect(added.filter((w) => w.door === 1)).toHaveLength(1);
     expect(() =>
       roomWalls({ x: 0, y: 0, width: 4, height: 3 }, { side: 'north', at: 3.5, width: 1 }),
     ).toThrow(/does not fit/);
   });
 
   it('sets door state only on doors, and removes walls by id in one write', async () => {
-    const { mock, updateDocuments, deleteDocuments } = client();
+    const { mock, list, writes } = setup();
     await handleSetDoor({ scene: 'Inn', wall: 'WALLDOORAAAAAAAA', state: 'locked' }, mock);
-    expect(updateDocuments).toHaveBeenCalledWith(
-      'Wall',
-      [{ _id: 'WALLDOORAAAAAAAA', ds: 2 }],
-      `Scene.${SCENE}`,
-    );
+    expect(list('walls').find((w) => w._id === 'WALLDOORAAAAAAAA')?.ds).toBe(2);
     await expect(
       handleSetDoor({ scene: 'Inn', wall: 'WALLPLAINAAAAAAA', state: 'open' }, mock),
     ).rejects.toThrow(/not a door/);
+    expect(list('walls').find((w) => w._id === 'WALLPLAINAAAAAAA')?.ds).toBeUndefined();
+    const before = writes().length;
     await handleRemoveWalls(
       { scene: 'Inn', walls: ['WALLDOORAAAAAAAA', 'WALLPLAINAAAAAAA'] },
       mock,
     );
-    expect(deleteDocuments).toHaveBeenCalledWith(
-      'Wall',
-      ['WALLDOORAAAAAAAA', 'WALLPLAINAAAAAAA'],
-      `Scene.${SCENE}`,
-    );
+    expect(writes().length - before).toBe(1);
+    expect(list('walls').map((w) => w._id)).toEqual(['WALLFARAAAAAAAAA']);
     await expect(handleRemoveWalls({ scene: 'Inn', walls: ['nope'] }, mock)).rejects.toThrow(
       /foundry_canvas list/,
     );
+    expect(list('walls')).toHaveLength(1);
   });
 
   it('lists walls in squares, filtered by category or area', async () => {
-    const { mock } = client();
+    const { mock } = setup();
     const all = text(await handleCanvasList({ scene: 'Inn', kind: 'walls' }, mock));
     expect(all).toContain('`WALLDOORAAAAAAAA` (0, 0) → (1, 0) · door · closed');
     expect(all).toContain('3 matches of 3');
@@ -233,7 +221,7 @@ describe('walls', () => {
 
 describe('regions', () => {
   it('builds v14 shape data in canvas pixels', async () => {
-    const { mock, createDocuments } = client();
+    const { mock, list } = setup();
     await handleAddRegion(
       {
         scene: 'Inn',
@@ -250,19 +238,14 @@ describe('regions', () => {
       },
       mock,
     );
-    const [type, data, parent] = createDocuments.mock.calls[0] as unknown as [
-      string,
-      Array<Record<string, unknown>>,
-      string,
-    ];
-    expect([type, parent]).toEqual(['Region', `Scene.${SCENE}`]);
-    expect(data[0]).toMatchObject({
+    const data = list('regions').find((r) => r.name === 'Trap');
+    expect(data).toMatchObject({
       name: 'Trap',
       color: '#ff0000',
       visibility: 1,
       elevation: { top: 10 },
     });
-    expect(data[0]?.shapes).toEqual([
+    expect(data?.shapes).toEqual([
       {
         type: 'rectangle',
         hole: false,
@@ -292,7 +275,7 @@ describe('regions', () => {
   });
 
   it('says what a shape is missing, then updates and removes by name', async () => {
-    const { mock, updateDocuments, deleteDocuments } = client();
+    const { mock, list } = setup();
     await expect(
       handleAddRegion({ scene: 'Inn', name: 'x', shapes: [{ type: 'circle', x: 1, y: 1 }] }, mock),
     ).rejects.toThrow(/circle region shape needs radius/);
@@ -302,28 +285,30 @@ describe('regions', () => {
         mock,
       ),
     ).rejects.toThrow(/at least 3 points/);
+    expect(list('regions')).toHaveLength(1);
     await handleUpdateRegion(
       { scene: 'Inn', region: 'fountain', hidden: true, elevation_bottom: null, name: 'Well' },
       mock,
     );
-    expect(updateDocuments).toHaveBeenCalledWith(
-      'Region',
-      [{ _id: 'REGIONAAAAAAAAAA', hidden: true, 'elevation.bottom': null, name: 'Well' }],
-      `Scene.${SCENE}`,
+    expect(list('regions')[0]).toMatchObject({
+      _id: 'REGIONAAAAAAAAAA',
+      hidden: true,
+      name: 'Well',
+    });
+    expect(list('regions')[0]?.elevation).toMatchObject({ bottom: null });
+    expect(text(await handleCanvasList({ scene: 'Inn', kind: 'regions' }, mock))).toContain(
+      '**Well**',
     );
     expect(
       text(await handleRemoveRegion({ scene: 'Inn', region: 'REGIONAAAAAAAAAA' }, mock)),
     ).toContain('had 1 behavior');
-    expect(deleteDocuments).toHaveBeenCalledWith('Region', ['REGIONAAAAAAAAAA'], `Scene.${SCENE}`);
-    expect(text(await handleCanvasList({ scene: 'Inn', kind: 'regions' }, mock))).toContain(
-      '**Fountain**',
-    );
+    expect(list('regions')).toEqual([]);
   });
 });
 
 describe('tiles and drawings', () => {
   it('adds and moves a tile in whole pixels', async () => {
-    const { mock, createDocuments, updateDocuments } = client();
+    const { mock, list } = setup();
     await handleAddTile(
       {
         scene: 'Inn',
@@ -337,44 +322,43 @@ describe('tiles and drawings', () => {
       },
       mock,
     );
-    expect(createDocuments).toHaveBeenCalledWith(
-      'Tile',
-      [
-        {
-          texture: { src: 'a/tree.png' },
-          x: 600,
-          y: 500,
-          width: 250,
-          height: 100,
-          alpha: 0.5,
-          hidden: true,
-        },
-      ],
-      `Scene.${SCENE}`,
-    );
+    expect(list('tiles')[1]).toMatchObject({
+      texture: { src: 'a/tree.png' },
+      x: 600,
+      y: 500,
+      width: 250,
+      height: 100,
+      alpha: 0.5,
+      hidden: true,
+    });
     await handleUpdateTile(
       { scene: 'Inn', tile: 'TILEAAAAAAAAAAAA', x: 2, y: 2, image: 'b.png' },
       mock,
     );
-    expect(updateDocuments).toHaveBeenCalledWith(
-      'Tile',
-      [{ _id: 'TILEAAAAAAAAAAAA', 'texture.src': 'b.png', x: 700, y: 600 }],
-      `Scene.${SCENE}`,
-    );
+    expect(list('tiles')[0]).toMatchObject({ texture: { src: 'b.png' }, x: 700, y: 600 });
+    // The update is sent with a dot-path key; the client cache must expand it.
+    const cachedTile = (
+      mock.getWorldData()?.scenes.find((sc) => sc.name === 'Inn') as unknown as {
+        tiles: Array<{ _id: string; texture?: { src?: string } }>;
+      }
+    ).tiles.find((t) => t._id === 'TILEAAAAAAAAAAAA');
+    expect(cachedTile?.texture?.src).toBe('b.png');
     await expect(
       handleUpdateTile({ scene: 'Inn', tile: 'TILEAAAAAAAAAAAA', x: 2 }, mock),
     ).rejects.toThrow(/both x and y/);
     await expect(
       handleAddTile({ scene: 'Inn', image: 'a.png', x: 1, y: 1, width: 0, height: 1 }, mock),
     ).rejects.toThrow(/positive/);
+    expect(list('tiles')).toHaveLength(2);
     expect(text(await handleCanvasList({ scene: 'Inn', kind: 'tiles' }, mock))).toContain(
-      'tree.png at (1, 1) 2×1 sq',
+      'at (2, 2) 2×1 sq',
     );
     await handleRemoveTile({ scene: 'Inn', tile: 'TILEAAAAAAAAAAAA' }, mock);
+    expect(list('tiles').map((t) => (t.texture as Row).src)).toEqual(['a/tree.png']);
   });
 
   it('draws shapes with single-letter v14 types and relative polygon points', async () => {
-    const { mock, createDocuments, updateDocuments, deleteDocuments } = client();
+    const { mock, list } = setup();
     await handleAddDrawing(
       {
         scene: 'Inn',
@@ -388,28 +372,19 @@ describe('tiles and drawings', () => {
       },
       mock,
     );
-    expect(createDocuments).toHaveBeenLastCalledWith(
-      'Drawing',
-      [
-        {
-          shape: { type: 'e', width: 200, height: 100 },
-          x: 600,
-          y: 500,
-          fillType: 1,
-          fillColor: '#00ff00',
-          author: 'USERGMAAAAAAAAAA',
-        },
-      ],
-      `Scene.${SCENE}`,
-    );
+    expect(list('drawings')[1]).toMatchObject({
+      shape: { type: 'e', width: 200, height: 100 },
+      x: 600,
+      y: 500,
+      fillType: 1,
+      fillColor: '#00ff00',
+      author: 'GMUSERAAAAAAAAAA',
+    });
     await handleAddDrawing(
       { scene: 'Inn', shape: 'polygon', x: 1, y: 1, points: [1, 1, 3, 1, 2, 3] },
       mock,
     );
-    expect(
-      (createDocuments.mock.calls.at(-1)?.[1] as Array<Record<string, unknown>> | undefined)?.[0]
-        ?.shape,
-    ).toEqual({
+    expect(list('drawings')[2]?.shape).toEqual({
       type: 'p',
       width: 200,
       height: 200,
@@ -428,9 +403,7 @@ describe('tiles and drawings', () => {
       },
       mock,
     );
-    expect(
-      (createDocuments.mock.calls.at(-1)?.[1] as Array<Record<string, unknown>> | undefined)?.[0],
-    ).toMatchObject({
+    expect(list('drawings')[3]).toMatchObject({
       shape: { type: 'r', width: 400, height: 100 },
       fillType: 0,
       strokeWidth: 0,
@@ -440,20 +413,18 @@ describe('tiles and drawings', () => {
     await expect(
       handleAddDrawing({ scene: 'Inn', shape: 'text', x: 0, y: 0, width: 1, height: 1 }, mock),
     ).rejects.toThrow(/needs text/);
+    expect(list('drawings')).toHaveLength(4);
     await handleUpdateDrawing(
       { scene: 'Inn', drawing: 'DRAWAAAAAAAAAAAA', hidden: true, stroke_color: '#fff' },
       mock,
     );
-    expect(updateDocuments).toHaveBeenCalledWith(
-      'Drawing',
-      [{ _id: 'DRAWAAAAAAAAAAAA', strokeColor: '#fff', hidden: true }],
-      `Scene.${SCENE}`,
-    );
-    await handleRemoveDrawing({ scene: 'Inn', drawing: 'DRAWAAAAAAAAAAAA' }, mock);
-    expect(deleteDocuments).toHaveBeenCalledWith('Drawing', ['DRAWAAAAAAAAAAAA'], `Scene.${SCENE}`);
+    expect(list('drawings')[0]).toMatchObject({ strokeColor: '#fff', hidden: true });
     expect(text(await handleCanvasList({ scene: 'Inn', kind: 'drawings' }, mock))).toContain(
       'rectangle at (0, 0) "Hatch"',
     );
+    await handleRemoveDrawing({ scene: 'Inn', drawing: 'DRAWAAAAAAAAAAAA' }, mock);
+    expect(list('drawings').map((d) => d._id)).not.toContain('DRAWAAAAAAAAAAAA');
+    expect(list('drawings')).toHaveLength(3);
   });
 });
 
@@ -487,9 +458,7 @@ describe('paging', () => {
       height: 100,
       texture: { src: `tree-${i}.png` },
     }));
-    const mock = {
-      getWorldSnapshot: () => ({ scenes: [scene({ tiles })] }),
-    } as unknown as FoundryClient;
+    const { mock } = setup({ tiles });
 
     const first = text(await handleCanvasList({ scene: 'Inn', kind: 'tiles', limit: 20 }, mock));
     expect(first).toContain('tree-0.png');

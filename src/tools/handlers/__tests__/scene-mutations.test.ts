@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
-import type { FoundryClient } from '../../../foundry/client.js';
+import { describe, expect, it } from 'vitest';
+import { fakeFoundry } from '../../../test-utils/fake-foundry.js';
 import {
   handleActivateScene,
   handleAddLight,
@@ -13,50 +13,47 @@ const SCENE = 'SCENEAAAAAAAAAAA';
 const JOURNAL = 'JOURNALAAAAAAAAA';
 const PAGE = 'PAGEAAAAAAAAAAAA';
 
-function client(active = false) {
-  const calls = {
-    createDocuments: vi.fn(async () => [{ _id: 'NEWAAAAAAAAAAAAA' }]),
-    updateDocuments: vi.fn(async () => []),
-    deleteDocuments: vi.fn(async () => []),
-  };
-  const scene = {
-    _id: SCENE,
-    name: 'Inn',
-    active,
-    width: 2000,
-    height: 1500,
-    padding: 0,
-    grid: { size: 100, distance: 5, units: 'ft' },
-    notes: [{ _id: 'NOTEAAAAAAAAAAAA', text: 'Cellar door' }],
-    lights: [{ _id: 'LIGHTAAAAAAAAAAA', name: 'Torch' }],
-  };
-  return {
-    mock: {
-      getWorldSnapshot: () => ({
-        scenes: [scene],
-        journal: [{ _id: JOURNAL, name: 'Inn Notes', pages: [{ _id: PAGE, name: 'Cellar' }] }],
-      }),
-      ...calls,
-    } as unknown as FoundryClient,
-    ...calls,
-  };
+type Row = Record<string, unknown>;
+
+function setup(active = false) {
+  const f = fakeFoundry({
+    world: {
+      scenes: [
+        {
+          _id: SCENE,
+          name: 'Inn',
+          active,
+          width: 2000,
+          height: 1500,
+          padding: 0,
+          grid: { size: 100, distance: 5, units: 'ft' },
+          notes: [{ _id: 'NOTEAAAAAAAAAAAA', text: 'Cellar door' }],
+          lights: [{ _id: 'LIGHTAAAAAAAAAAA', name: 'Torch' }],
+        },
+      ],
+      journal: [{ _id: JOURNAL, name: 'Inn Notes', pages: [{ _id: PAGE, name: 'Cellar' }] }],
+    },
+  });
+  const scene = () => f.world.scenes?.[0] as Row;
+  const writes = () => f.sent.filter((s) => s.action !== 'get');
+  return { ...f, mock: f.client, scene, writes };
 }
 
 describe('scene mutation handlers', () => {
   it('activates a scene, and skips the write when it is already active', async () => {
-    const { mock, updateDocuments } = client();
+    const { mock, scene } = setup();
     await handleActivateScene({ scene: 'inn' }, mock);
-    expect(updateDocuments).toHaveBeenCalledWith('Scene', [{ _id: SCENE, active: true }]);
-    const again = client(true);
+    expect(scene().active).toBe(true);
+    const again = setup(true);
     const out = (await handleActivateScene({ scene: 'Inn' }, again.mock)).content[0] as {
       text: string;
     };
     expect(out.text).toContain('already the active scene');
-    expect(again.updateDocuments).not.toHaveBeenCalled();
+    expect(again.writes()).toEqual([]);
   });
 
-  it('maps settings to v14 dot paths', async () => {
-    const { mock, updateDocuments } = client();
+  it('maps settings onto the v14 nested fields', async () => {
+    const { mock, scene } = setup();
     await handleUpdateScene(
       {
         scene: 'Inn',
@@ -68,54 +65,51 @@ describe('scene mutation handlers', () => {
       },
       mock,
     );
-    expect(updateDocuments).toHaveBeenCalledWith('Scene', [
-      {
-        _id: SCENE,
-        name: 'Inn 2',
-        navigation: true,
-        'environment.darknessLevel': 0.8,
-        'environment.globalLight.enabled': true,
-        'grid.size': 140,
-      },
-    ]);
+    expect(scene()).toMatchObject({
+      name: 'Inn 2',
+      navigation: true,
+      environment: { darknessLevel: 0.8, globalLight: { enabled: true } },
+      grid: { size: 140, distance: 5, units: 'ft' }, // siblings of the changed key survive
+    });
     await expect(handleUpdateScene({ scene: 'Inn' }, mock)).rejects.toThrow(/at least one setting/);
   });
 
   it('adds a note at the centre of a grid square, linked to a journal page', async () => {
-    const { mock, createDocuments } = client();
+    const { mock, scene, writes } = setup();
     await handleAddNote(
       { scene: 'Inn', x: 3, y: 2, journal: 'inn notes', page: 'cellar', text: 'Cellar' },
       mock,
     );
-    expect(createDocuments).toHaveBeenCalledWith(
-      'Note',
-      [{ x: 350, y: 250, entryId: JOURNAL, pageId: PAGE, text: 'Cellar' }],
-      `Scene.${SCENE}`,
-    );
+    expect((scene().notes as Row[])[1]).toMatchObject({
+      x: 350,
+      y: 250,
+      entryId: JOURNAL,
+      pageId: PAGE,
+      text: 'Cellar',
+    });
+    const before = writes().length;
     await expect(handleAddNote({ scene: 'Inn', x: 99, y: 1 }, mock)).rejects.toThrow(
       /outside the map/,
     );
     await expect(handleAddNote({ scene: 'Inn', x: 1, y: 1, page: 'x' }, mock)).rejects.toThrow(
       /needs journal/,
     );
+    expect(writes().length).toBe(before);
   });
 
   it('adds a light with config and default radii, and removes notes and lights', async () => {
-    const { mock, createDocuments, deleteDocuments } = client();
+    const { mock, scene } = setup();
     await handleAddLight({ scene: 'Inn', x: 0, y: 0, color: '#ff8800', name: 'Brazier' }, mock);
-    expect(createDocuments).toHaveBeenCalledWith(
-      'AmbientLight',
-      [{ x: 50, y: 50, name: 'Brazier', config: { color: '#ff8800', dim: 20, bright: 10 } }],
-      `Scene.${SCENE}`,
-    );
+    expect((scene().lights as Row[])[1]).toMatchObject({
+      x: 50,
+      y: 50,
+      name: 'Brazier',
+      config: { color: '#ff8800', dim: 20, bright: 10 },
+    });
     await handleRemoveNote({ scene: 'Inn', note: 'cellar door' }, mock);
-    expect(deleteDocuments).toHaveBeenCalledWith('Note', ['NOTEAAAAAAAAAAAA'], `Scene.${SCENE}`);
+    expect(scene().notes).toEqual([]);
     await handleRemoveLight({ scene: 'Inn', light: 'LIGHTAAAAAAAAAAA' }, mock);
-    expect(deleteDocuments).toHaveBeenLastCalledWith(
-      'AmbientLight',
-      ['LIGHTAAAAAAAAAAA'],
-      `Scene.${SCENE}`,
-    );
+    expect((scene().lights as Row[]).map((l) => l.name)).toEqual(['Brazier']);
     await expect(handleRemoveLight({ scene: 'Inn', light: 'nope' }, mock)).rejects.toThrow(
       /No light on "Inn"/,
     );
