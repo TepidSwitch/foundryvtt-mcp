@@ -35,22 +35,22 @@ Tools are domains: one read tool (`foundry_<domain>`) or write tool (`foundry_<d
 
 ## Testing
 
+Unit tests are Vitest. Code that talks to Foundry is tested against a fake socket
+that asserts the resulting world state (see `.claude/rules/testing.md`). Nothing
+here needs a running Foundry except the live smoke suite and Playwright E2E.
+
 ```bash
-# Unit tests
-npm test
-
-# Watch mode
-npm run test:watch
-
-# Coverage report
-npm run test:coverage
-
-# Lint code
-npm run lint
-
-# E2E tests (requires running FoundryVTT)
-npm run test:e2e
+just qa              # lint + type check + unit tests (the pre-commit gate)
+just test            # unit tests (npm test)
+just test-coverage   # v8 coverage report (informational, no thresholds)
+just smoke-live --yes  # scripted check against the REAL world (see below)
+npm run test:e2e     # Playwright smoke specs (requires running FoundryVTT)
 ```
+
+CI for this fork (`.github/workflows/fork-ci.yml`) runs on `stas/**` and `feat/**`
+pushes: `bun install --frozen-lockfile`, lint, `tsc --noEmit`, build, unit tests,
+and the three smoke tests below. The old Docker-based integration tier was
+removed; `just smoke-live` against a real world replaces it.
 
 ### Live smoke suite
 
@@ -81,12 +81,13 @@ steps they need). Not part of CI or `npm test`.
 
 ### Smoke tests
 
-Two smoke tests verify the server boots end-to-end without a live FoundryVTT.
-They run in CI on every PR and catch failure modes that the mocked Vitest
+Smoke tests verify the server boots end-to-end without a live FoundryVTT.
+They run in Fork CI and catch failure modes that the mocked Vitest
 suite cannot:
 
 ```bash
 npm run smoke        # Spawn dist/index.js, verify the startup banner on stderr
+npm run smoke:dotenv # Verify the secrets-file load order
 npm run smoke:pack   # npm pack -> install into a fresh consumer -> verify banner
 ```
 

@@ -1,5 +1,8 @@
 # FoundryVTT MCP Server Setup Guide
 
+> **This fork:** the current setup and settings live in [docs/guides/fork-setup.md](docs/guides/fork-setup.md) and [docs/guides/configuration.md](docs/guides/configuration.md). Tool names below are from the original server; the fork groups them into domain tools (for example `foundry_diagnostics health`). The REST API module and `FOUNDRY_API_KEY` are no longer used.
+
+
 This guide walks you through setting up the FoundryVTT MCP Server.
 
 ## Quick Start
@@ -83,8 +86,7 @@ All features work out of the box with username/password authentication:
 
 - Search actors, items, scenes, and journals
 - Get detailed actor/item information
-- Dice rolling (evaluated locally in this mode; FoundryVTT's own `Roll` engine — and
-  with it parenthesised formulas — is used only when `FOUNDRY_API_KEY` is set)
+- Dice rolling (evaluated locally; parenthesised formulas are not supported)
 - Combat state and initiative tracking
 - Chat message history
 - User list and online status
@@ -101,24 +103,16 @@ All features work out of the box with username/password authentication:
 | `FOUNDRY_USERNAME` | Yes      | FoundryVTT username                          | -       |
 | `FOUNDRY_PASSWORD` | Yes      | FoundryVTT password                          | -       |
 | `FOUNDRY_USER_ID`  | No       | 16-char document `_id` (bypasses username resolution) | - |
-| `FOUNDRY_API_KEY`  | No       | REST API module key (enables diagnostics)    | -       |
 | `LOG_LEVEL`        | No       | Logging level                                | `info`  |
 
-### Optional: Diagnostics Tools
+### Diagnostics
 
-Installing the **Foundry Local REST API** module and setting `FOUNDRY_API_KEY` enables 5 server monitoring tools:
+`foundry_diagnostics` works without any module, from the world snapshot and the MCP's own log buffer:
 
-- `get_recent_logs` - Retrieve filtered FoundryVTT logs
-- `search_logs` - Search logs by pattern, listing the matching entries
-- `get_system_health` - Server health status with versions, user/module counts, memory and log error counts (no CPU or disk metrics)
-- `diagnose_errors` - **stub**: returns a fixed "no errors detected" summary
-- `get_health_status` - Comprehensive health diagnostics; note that in this mode the
-  connection line reports the last REST request's outcome, not a live probe
-
-To enable:
-1. Install the REST API module in FoundryVTT
-2. Enable it in your world and copy the generated API key
-3. Add `FOUNDRY_API_KEY=your_key` to your `.env` file
+- `health` - connection, login role, world data age
+- `system` - versions, users, modules, log buffer and error rate
+- `logs` / `search_logs` - recent MCP log entries, or a search over them
+- `diagnose` - **stub**: returns a fixed "no errors detected" summary
 
 ## Testing Your Setup
 

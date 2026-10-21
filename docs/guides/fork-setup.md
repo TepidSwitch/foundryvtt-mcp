@@ -201,13 +201,13 @@ world data is.
 
 ## Diagnostics
 
-`get_system_health`, `get_recent_logs`, `search_logs`, `diagnose_errors` and the
-system section of `get_health_status` need no Foundry module. Health is computed
-from the world snapshot (version, system, users online, active modules,
-connection and staleness); the log tools read this MCP server's own recent log
-(logins, tool failures, write errors). Foundry's own server log, uptime and
-memory are not available. The REST bridge and `FOUNDRY_API_KEY` were removed; a
-leftover `FOUNDRY_API_KEY` is ignored with a startup warning.
+`foundry_diagnostics` (`health`, `system`, `search_logs`, `logs`, `diagnose`) needs
+no Foundry module. Health is computed from the world snapshot (version, system,
+users online, active modules, connection and staleness); the log actions read this
+MCP server's own recent log (logins, tool failures, write errors). `diagnose` is a
+fixed stub. Foundry's own server log, uptime and memory are not available. The REST
+bridge and `FOUNDRY_API_KEY` were removed; a leftover `FOUNDRY_API_KEY` is ignored
+with a startup warning.
 
 ## Write safety
 
