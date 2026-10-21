@@ -94,6 +94,18 @@ function newId(): string {
   return id;
 }
 
+/** Drops ForcedDeletion leaves, as Foundry's update reply does. */
+function withoutDeletions(doc: Doc): Doc {
+  for (const [key, value] of Object.entries(doc)) {
+    if (isRecord(value) && value[FORCED_DELETION_KEY] === 'ForcedDeletion') {
+      delete doc[key];
+    } else if (isRecord(value)) {
+      withoutDeletions(value);
+    }
+  }
+  return doc;
+}
+
 /** Foundry's update merge: nested objects merge, ForcedDeletion removes, `a.b` keys expand. */
 function mergeUpdate(target: Doc, update: Doc): void {
   for (const [rawKey, value] of Object.entries(update)) {
@@ -339,8 +351,9 @@ class FakeServer {
         mergeUpdate(target, update);
       }
     }
-    // The reply echoes the request, as Foundry does (accepted != applied).
-    return { result: structuredClone(updates) };
+    // The reply echoes the request, as Foundry does (accepted != applied), but
+    // leaves out keys removed with ForcedDeletion (live finding).
+    return { result: updates.map((u) => withoutDeletions(structuredClone(u))) };
   }
 }
 

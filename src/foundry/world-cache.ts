@@ -103,10 +103,40 @@ function deepMergeInto(
   src: Record<string, unknown>,
 ): Record<string, unknown> {
   for (const [k, v] of Object.entries(src)) {
+    if (isForcedDeletion(v)) {
+      delete target[k];
+      continue;
+    }
     const t = target[k];
     target[k] = isRecord(t) && isRecord(v) ? deepMergeInto(t, v) : v;
   }
   return target;
+}
+
+/** Foundry's ForcedDeletion operator as it travels over the socket. */
+export function isForcedDeletion(value: unknown): boolean {
+  return isRecord(value) && value.__$OPERATOR$__ === 'ForcedDeletion';
+}
+
+/**
+ * The ForcedDeletion leaves of an update (with its `_id`), or null when it has
+ * none. Foundry's update reply leaves deleted keys out (live finding), so the
+ * cache applies these from the request instead.
+ */
+export function deletionsOnly(update: Record<string, unknown>): Record<string, unknown> | null {
+  const walk = (src: Record<string, unknown>): Record<string, unknown> | null => {
+    let out: Record<string, unknown> | null = null;
+    for (const [k, v] of Object.entries(src)) {
+      const kept = isForcedDeletion(v) ? v : isRecord(v) ? walk(v) : null;
+      if (kept) {
+        out ??= {};
+        out[k] = kept;
+      }
+    }
+    return out;
+  };
+  const found = walk(update);
+  return found ? { _id: update._id, ...found } : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -190,7 +220,7 @@ function mergePatch(target: Record<string, unknown>, patch: Record<string, unkno
     if (FORBIDDEN_KEYS.has(key)) {
       continue;
     }
-    if (value === null) {
+    if (value === null || isForcedDeletion(value)) {
       delete target[key];
       continue;
     }

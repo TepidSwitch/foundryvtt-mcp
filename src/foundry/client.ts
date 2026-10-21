@@ -50,19 +50,13 @@ import { VISIBILITY_LEVELS } from './types.js';
 import {
   applyDocumentBroadcast,
   applyUserActivity,
+  deletionsOnly,
   expandPaths,
   findCachedDocuments,
   parseDocumentBroadcast,
   parseUserActivity,
 } from './world-cache.js';
-import {
-  type AuditEntry,
-  fakeDocumentId,
-  leafPaths,
-  namesOf,
-  planUndo,
-  WriteAudit,
-} from './write-audit.js';
+import { type AuditEntry, fakeDocumentId, namesOf, planUndo, WriteAudit } from './write-audit.js';
 
 /** FoundryVTT document IDs are 16-character alphanumeric strings. */
 const FOUNDRY_ID_PATTERN = /^[a-zA-Z0-9]{16}$/;
@@ -1316,9 +1310,6 @@ export class FoundryClient {
       ...(this.currentBatchId ? { batchId: this.currentBatchId } : {}),
       ...(action === 'update' ? { updates: opUpdates } : {}),
       ...(before && before.length > 0 ? { before } : {}),
-      ...(type === 'ActorDelta' && action === 'update'
-        ? { baseValues: this.baseValuesForDelta(parentUuidArg, opUpdates) }
-        : {}),
     });
 
     // FoundryVTT broadcasts a change to every OTHER client, never back to the one
@@ -1328,12 +1319,17 @@ export class FoundryClient {
     if (this.worldData) {
       try {
         const parentUuid = operation.parentUuid;
-        applyDocumentBroadcast(this.worldData, {
-          type,
-          action,
-          result,
-          ...(typeof parentUuid === 'string' && parentUuid ? { parentUuid } : {}),
-        });
+        const parent = typeof parentUuid === 'string' && parentUuid ? { parentUuid } : {};
+        applyDocumentBroadcast(this.worldData, { type, action, result, ...parent });
+        // The reply leaves out keys removed with ForcedDeletion (live finding),
+        // so apply those removals from the request.
+        const deletions =
+          action === 'update'
+            ? opUpdates.map(deletionsOnly).filter((d): d is Record<string, unknown> => d !== null)
+            : [];
+        if (deletions.length > 0) {
+          applyDocumentBroadcast(this.worldData, { type, action, result: deletions, ...parent });
+        }
       } catch (error) {
         logger.warn('Failed to apply own write to cached worldData', {
           type,
@@ -1343,39 +1339,6 @@ export class FoundryClient {
       }
     }
     return result;
-  }
-
-  /** The base actor's current values at the leaves of unlinked-token delta updates (for undo). */
-  private baseValuesForDelta(
-    parentUuid: string | undefined,
-    updates: Array<Record<string, unknown>>,
-  ): Array<Record<string, unknown>> {
-    const match = /^Scene\.([^.]+)\.Token\.([^.]+)$/.exec(parentUuid ?? '');
-    const located = match ? this.findToken(match[2] as string, match[1] as string) : null;
-    const baseId = typeof located?.token.actorId === 'string' ? located.token.actorId : '';
-    const base = baseId ? this.getRawActor(baseId) : undefined;
-    return updates.map((update) => {
-      const out: Record<string, unknown> = { _id: update._id };
-      for (const path of leafPaths(update)) {
-        let src: unknown = base;
-        for (const part of path.split('.')) {
-          src = isRecord(src) ? src[part] : undefined;
-        }
-        if (src === undefined) {
-          continue;
-        }
-        let dst = out;
-        const parts = path.split('.');
-        for (const part of parts.slice(0, -1)) {
-          if (!isRecord(dst[part])) {
-            dst[part] = {};
-          }
-          dst = dst[part] as Record<string, unknown>;
-        }
-        dst[parts[parts.length - 1] as string] = structuredClone(src);
-      }
-      return out;
-    });
   }
 
   /**
