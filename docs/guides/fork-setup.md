@@ -120,7 +120,7 @@ hidden, and refused if called, unless `FOUNDRY_WRITE_ENABLED=true`.
 | canvas (off by default) | `foundry_canvas`: list | `foundry_canvas_edit`: add_walls, add_room, set_door, remove_walls, add_region, update_region, remove_region, add_tile, update_tile, remove_tile, add_drawing, update_drawing, remove_drawing |
 | script (off by default) | none | `foundry_script`: run |
 | files | `foundry_files`: browse | `foundry_files_edit`: mkdir, upload |
-| generate | `foundry_generate`: npc, loot, encounter, map_status, rule | `foundry_generate_edit`: map, cancel_map (needs `COMFYUI_URL`) |
+| generate | `foundry_generate`: npc (compendium NPC finder), loot, encounter, map_status, rule | `foundry_generate_edit`: map, cancel_map (needs `COMFYUI_URL`) |
 | history | `foundry_history`: log | `foundry_history_edit`: undo |
 | diagnostics | `foundry_diagnostics`: health, system, search_logs, logs, diagnose | |
 
@@ -129,6 +129,8 @@ That is 13 tools read-only and 26 with writes enabled (27 with `COMFYUI_URL` set
 List actions for canvas, world browse, journal search, actor search, audio list and files browse take an `offset` argument. When more results remain, the footer says `next offset=<n>`; pass that number to get the next page.
 
 Roll tables: `foundry_tables_edit` changes the tables and their rows. `foundry_chat_edit draw_table` draws from them and honours `replacement: false`; `reset_table` makes drawn rows drawable again. Macros are managed with `foundry_world_edit` (`create_macro`, `update_macro`, `delete_macro`). The server never runs a macro. A script macro needs the MACRO_SCRIPT permission.
+
+NPC finder: `foundry_generate npc` searches the Actor compendiums (read-only) by `query`, `cr` (nearest first), `cr_min`/`cr_max`, `creature_type`, `environment`, `packs`, `limit` (default 10, max 50) and lists name, CR, type, habitats, pack and the Compendium uuid. It replaces the old random-text generator (`level`/`race`/`class` are gone). 2024 statblocks win over "(Legacy)" twins unless `legacy: true`, which `encounter` accepts too.
 
 Encounters: `foundry_generate encounter` proposes a set of monsters for the party by CR and XP budget. It creates nothing. `foundry_tokens_edit place_encounter` turns that output into imported actors, tokens and optionally combat, as one undo step.
 

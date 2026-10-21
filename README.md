@@ -142,7 +142,7 @@ Ask your AI assistant things like:
 - "Show me all the NPCs in this scene"
 - "What's the current combat initiative order?"
 - "Search the world for anything related to dragons"
-- "Generate a random NPC merchant"
+- "Find a CR 3 undead in the compendium"
 
 ## Available Tools
 
@@ -162,7 +162,7 @@ Tools are named `foundry_<domain>` (read) and `foundry_<domain>_edit` (write); p
 | world | `foundry_world`: summary, search, browse, users, refresh | `foundry_world_edit`: create_folder, move_to_folder, create_macro, update_macro, delete_macro |
 | tables | | `foundry_tables_edit`: create_table, update_table, add_results, remove_results, delete_table, reset_table |
 | files | `foundry_files`: browse | `foundry_files_edit`: mkdir, upload |
-| generate | `foundry_generate`: npc, loot, encounter, map_status, rule | `foundry_generate_edit`: map, cancel_map (needs `COMFYUI_URL`) |
+| generate | `foundry_generate`: npc (compendium NPC finder), loot, encounter, map_status, rule | `foundry_generate_edit`: map, cancel_map (needs `COMFYUI_URL`) |
 | history | `foundry_history`: log | `foundry_history_edit`: undo |
 | diagnostics | `foundry_diagnostics`: health, system, logs, search_logs, diagnose | |
 | canvas (opt-in) | `foundry_canvas`: list | `foundry_canvas_edit`: walls, regions, tiles, drawings |

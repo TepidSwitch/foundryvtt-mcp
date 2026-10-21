@@ -78,6 +78,40 @@ export interface Candidate {
   xp: number;
 }
 
+const LEGACY_SUFFIX = /\s*\(legacy\)\s*$/i;
+
+export function isLegacyName(name: string): boolean {
+  return LEGACY_SUFFIX.test(name);
+}
+
+/**
+ * Family key for near-duplicate detection: the name without parenthetical
+ * qualifiers such as "(Legacy)" or "(Variant)", lowercased. "Cultist" and
+ * "Aberrant Cultist" are different families (different statblocks); "Goblin"
+ * and "Goblin (Legacy)" are the same one.
+ */
+export function baseName(name: string): string {
+  return name
+    .replace(/\s*\([^)]*\)/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Prefers 2024 statblocks: drops "X (Legacy)" when a non-legacy "X" exists.
+ * A legacy entry with no current counterpart is kept. No-op when `keepLegacy`.
+ */
+export function dropLegacyDuplicates<T extends { name: string }>(
+  items: T[],
+  keepLegacy = false,
+): T[] {
+  if (keepLegacy) {
+    return items;
+  }
+  const current = new Set(items.filter((i) => !isLegacyName(i.name)).map((i) => baseName(i.name)));
+  return items.filter((i) => !isLegacyName(i.name) || !current.has(baseName(i.name)));
+}
+
 export interface EncounterEntry {
   candidate: Candidate;
   count: number;
@@ -100,7 +134,9 @@ function sorted(candidates: Candidate[], seed: number): Candidate[] {
   if (seed === 0) {
     return list;
   }
-  // Rotate within each equal-XP group so a different seed surfaces a different creature.
+  // Shuffle within each equal-XP group with a seeded PRNG. A plain rotation by
+  // `seed % size` kept small seeds on the alphabetically first names (seen live).
+  const random = mulberry32(Math.trunc(seed));
   const out: Candidate[] = [];
   for (let i = 0; i < list.length; ) {
     let j = i;
@@ -108,11 +144,26 @@ function sorted(candidates: Candidate[], seed: number): Candidate[] {
       j++;
     }
     const group = list.slice(i, j);
-    const r = Math.abs(Math.trunc(seed)) % group.length;
-    out.push(...group.slice(r), ...group.slice(0, r));
+    for (let k = group.length - 1; k > 0; k--) {
+      const r = Math.floor(random() * (k + 1));
+      [group[k], group[r]] = [group[r] as Candidate, group[k] as Candidate];
+    }
+    out.push(...group);
     i = j;
   }
   return out;
+}
+
+/** Small deterministic PRNG (mulberry32): the same seed gives the same picks. */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 function finish(
@@ -136,7 +187,7 @@ function fill(
   slots: number,
   exclude: Set<string>,
 ): EncounterEntry[] {
-  const pick = pool.find((c) => !exclude.has(c.uuid) && c.xp <= remaining);
+  const pick = pool.find((c) => !exclude.has(baseName(c.name)) && c.xp <= remaining);
   if (!pick || slots < 1) {
     return [];
   }
@@ -167,14 +218,21 @@ export function buildOptions(
   // Boss: the priciest creature that fits, then filler with what is left.
   const boss = pool[0] as Candidate;
   const bossEntries: EncounterEntry[] = [{ candidate: boss, count: 1 }];
-  bossEntries.push(...fill(pool, budget - boss.xp, maxCreatures - 1, new Set([boss.uuid])));
+  bossEntries.push(
+    ...fill(pool, budget - boss.xp, maxCreatures - 1, new Set([baseName(boss.name)])),
+  );
   options.push(finish('boss', 'Boss', bossEntries));
 
+  // Dedupe rule (all options): within one option a creature family (baseName)
+  // appears as one pick only, so a variant or legacy twin never doubles up
+  // with its sibling; distinct statblocks like Cultist / Aberrant Cultist are fine.
   // Leader + followers: leader at most half the budget, followers fill the rest.
-  const leader = pool.find((c) => c.xp <= budget / 2 && c.uuid !== boss.uuid);
+  const leader = pool.find((c) => c.xp <= budget / 2 && baseName(c.name) !== baseName(boss.name));
   if (leader && maxCreatures >= 2) {
     const rest = budget - leader.xp;
-    const follower = pool.find((c) => c.xp <= leader.xp / 2 && c.xp <= rest);
+    const follower = pool.find(
+      (c) => c.xp <= leader.xp / 2 && c.xp <= rest && baseName(c.name) !== baseName(leader.name),
+    );
     if (follower) {
       const count = Math.min(maxCreatures - 1, Math.floor(rest / follower.xp));
       options.push(
