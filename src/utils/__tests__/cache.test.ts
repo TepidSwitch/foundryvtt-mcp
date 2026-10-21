@@ -2,18 +2,26 @@
  * @fileoverview Tests for the caching system
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CacheService } from '../cache.js';
 
 describe('CacheService', () => {
   let cache: CacheService;
 
   beforeEach(() => {
+    // Fake the clock so TTL and LRU ordering depend only on advanceTimersByTime,
+    // never on how long the real event loop takes.
+    vi.useFakeTimers();
     cache = new CacheService({
       enabled: true,
       ttlSeconds: 1, // Short TTL for testing
       maxSize: 3, // Small size for eviction testing
     });
+  });
+
+  afterEach(() => {
+    cache.destroy();
+    vi.useRealTimers();
   });
 
   describe('Basic Operations', () => {
@@ -42,12 +50,12 @@ describe('CacheService', () => {
   });
 
   describe('TTL (Time To Live)', () => {
-    it('should expire entries after TTL', async () => {
+    it('should expire entries after TTL', () => {
       cache.set('key1', 'value1');
       expect(cache.get('key1')).toBe('value1');
 
-      // Wait for expiration
-      await new Promise((resolve) => setTimeout(resolve, 1100));
+      // Advance the fake clock past the 1s TTL
+      vi.advanceTimersByTime(1100);
       expect(cache.get('key1')).toBeUndefined();
     });
 
@@ -58,12 +66,12 @@ describe('CacheService', () => {
   });
 
   describe('LRU Eviction', () => {
-    it('should evict least recently used entries when max size exceeded', async () => {
+    it('should evict least recently used entries when max size exceeded', () => {
       cache.set('key1', 'value1');
-      // Small delay to ensure different timestamps
-      await new Promise((resolve) => setTimeout(resolve, 1));
+      // Advance the fake clock so each entry gets a distinct timestamp
+      vi.advanceTimersByTime(1);
       cache.set('key2', 'value2');
-      await new Promise((resolve) => setTimeout(resolve, 1));
+      vi.advanceTimersByTime(1);
       cache.set('key3', 'value3');
 
       // Access key1 and key3 to make them recently used
