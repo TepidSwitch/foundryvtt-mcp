@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  deltaHasHpValue,
+  extractBacktickIds,
   extractCreatures,
   extractHp,
+  extractLabeledId,
   extractMessageId,
   findLeftovers,
   newDocs,
   newUndoable,
+  parsePageFooter,
   parseScriptResult,
   parseSmokeArgs,
   parseWriteLog,
@@ -68,10 +72,47 @@ describe('live smoke helpers', () => {
     expect(newUndoable(new Set(['w0']), entries).map((e) => e.id)).toEqual(['w2']);
   });
 
+  it('parses entries with no names (an unnamed Combat), as trimmed live', () => {
+    // Live finding: these were skipped, so cleanup never undid combat writes.
+    const entries = parseWriteLog(
+      '- `w9` 2026-01-01 · create Combat ·\n- `w8` 2026-01-01 · update Combat · 1 id(s)',
+    );
+    expect(entries.map((e) => [e.id, e.action, e.type, e.names])).toEqual([
+      ['w9', 'create', 'Combat', []],
+      ['w8', 'update', 'Combat', ['1 id(s)']],
+    ]);
+  });
+
   it('detects leftovers and new documents', () => {
     const a = { type: 'Actor', id: '1', name: 'Bob' };
     const b = { type: 'Scene', id: '2', name: 'MCP TEST — delete me' };
     expect(findLeftovers([a, b])).toEqual([b]);
     expect(newDocs([a], [a, b])).toEqual([b]);
+  });
+
+  it('extracts labeled ids and backticked ids', () => {
+    const t =
+      '**Item:** X (loot)\n**Item ID:** abc123DEF456ghij\n**IDs:** `aaaaaaaaaaaaaaaa` `bbbbbbbbbbbbbbbb`';
+    expect(extractLabeledId(t, 'Item ID')).toBe('abc123DEF456ghij');
+    expect(extractLabeledId(t, 'Nope')).toBeUndefined();
+    expect(extractBacktickIds(t)).toEqual(['aaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbb']);
+  });
+
+  it('parses the paging footer', () => {
+    expect(parsePageFooter('x\n_Showing 1–1 of 2; next offset=1._')).toEqual({
+      from: 1,
+      to: 1,
+      total: 2,
+      nextOffset: 1,
+    });
+    expect(parsePageFooter('_Showing 2–2 of 2._')?.nextOffset).toBeUndefined();
+    expect(parsePageFooter('nothing')).toBeUndefined();
+  });
+
+  it('detects an hp override on a token delta', () => {
+    expect(deltaHasHpValue({ system: { attributes: { hp: { value: 17 } } } })).toBe(true);
+    expect(deltaHasHpValue({ system: { attributes: { hp: { temp: 2 } } } })).toBe(false);
+    expect(deltaHasHpValue({})).toBe(false);
+    expect(deltaHasHpValue(null)).toBe(false);
   });
 });

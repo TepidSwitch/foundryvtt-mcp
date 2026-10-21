@@ -99,7 +99,8 @@ export interface WriteLogEntry {
   undoOf: boolean;
 }
 
-const LOG_LINE = /^- `([^`]+)` \S+ · (\w+) (\w+)(?: \(in [^)]*\))? · (.*?)(?: · _([^_]*)_)?$/;
+// The names part can be empty (an unnamed Combat), and line.trim() drops its trailing space.
+const LOG_LINE = /^- `([^`]+)` \S+ · (\w+) (\w+)(?: \(in [^)]*\))?(?: ·(?: (.*?))?)?(?: · _([^_]*)_)?$/;
 
 /** Parse foundry_history log text (newest first). */
 export function parseWriteLog(text: string): WriteLogEntry[] {
@@ -112,7 +113,7 @@ export function parseWriteLog(text: string): WriteLogEntry[] {
       id: m[1] as string,
       action: m[2] as string,
       type: m[3] as string,
-      names: (m[4] as string).split(', '),
+      names: m[4] ? m[4].split(', ') : [],
       dryRun: /dry-run/.test(flags),
       undone: /\bundone\b/.test(flags),
       undoOf: /undo of/.test(flags),
@@ -191,4 +192,38 @@ function findHp(node: unknown, depth: number): Hp | undefined {
 export function extractHp(doc: unknown): Hp | undefined {
   const rec = doc as Record<string, unknown> | null;
   return findHp(rec?.delta, 0) ?? findHp(doc, 0);
+}
+
+/** The id after a bold label such as "**Item ID:** x" (label without the colon). */
+export function extractLabeledId(text: string, label: string): string | undefined {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\*\\*${escaped}:\\*\\*\\s*\`?([A-Za-z0-9]+)\`?`).exec(text)?.[1];
+}
+
+/** Every backticked 16-character Foundry id in a tool output, in order. */
+export function extractBacktickIds(text: string): string[] {
+  return [...text.matchAll(/`([A-Za-z0-9]{16})`/g)].map((m) => m[1] as string);
+}
+
+/** Paging footer of a list: "Showing 2–3 of 5; next offset=3". */
+export function parsePageFooter(
+  text: string,
+): { from: number; to: number; total: number; nextOffset: number | undefined } | undefined {
+  const m = /Showing (\d+)[–-](\d+) of (\d+)(?:; next offset=(\d+))?/.exec(text);
+  if (!m) return undefined;
+  return {
+    from: Number(m[1]),
+    to: Number(m[2]),
+    total: Number(m[3]),
+    nextOffset: m[4] === undefined ? undefined : Number(m[4]),
+  };
+}
+
+/** True when a token delta carries its own hp.value override. */
+export function deltaHasHpValue(delta: unknown): boolean {
+  const hp = (
+    (delta as { system?: { attributes?: { hp?: Record<string, unknown> } } } | null)?.system
+      ?.attributes?.hp
+  ) as Record<string, unknown> | undefined;
+  return !!hp && hp.value !== undefined && hp.value !== null;
 }

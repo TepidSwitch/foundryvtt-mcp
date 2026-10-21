@@ -64,7 +64,14 @@ It writes to the live world, but only documents named exactly `MCP TEST — dele
 create a test actor and scene (`foundry_script`), `place_group`, `fit_grid`, damage /
 temp HP / heal on an unlinked token and a read-back from a fresh server process,
 `request_rest`, a no-replacement roll table with `draw_table` and `reset_table`,
-`create_macro`, `foundry_generate encounter`, and `place_encounter` with `start_combat`.
+`create_macro`, an audio playlist (volume-0 sounds, play/stop by name, nothing left playing),
+a journal with a replaced page, an active effect (create / disable / enable / delete),
+an actor item (`add_to_actor` / `update_on_actor` / `remove_from_actor`), canvas walls and a
+region with `offset` paging, `foundry_combat_edit` start / `next_turn` / `end` (the previously
+active combat must be active again), `foundry_generate encounter`, and `place_encounter` with
+`start_combat`. `undo_hp` checks both a token with an hp override (restored) and a fresh token
+without one (the override is removed, base actor unchanged). Scene activate/update and item
+`use` are deliberately skipped because they disturb connected players.
 It aborts if any `MCP TEST` document already exists. Cleanup always runs (also on failure
 or Ctrl-C): every write made during the run is undone newest first with
 `foundry_history_edit undo`, then it checks the world search, document ids and the active

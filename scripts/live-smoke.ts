@@ -19,13 +19,17 @@ import { loadServerEnv, McpSession, type ToolResult } from './lib/mcp-session.js
 import {
   ALL_TOOLSETS,
   type DocRef,
+  deltaHasHpValue,
+  extractBacktickIds,
   extractCreatures,
   extractHp,
+  extractLabeledId,
   extractMessageId,
   findLeftovers,
   missingDocs,
   newDocs,
   newUndoable,
+  parsePageFooter,
   parseScriptResult,
   parseSmokeArgs,
   parseWriteLog,
@@ -47,12 +51,15 @@ interface State {
   actorId?: string;
   sceneId?: string;
   tokenId?: string;
+  /** Second token (fresh, no hp override) placed by undo_hp. */
+  token2Id?: string;
   chatIds: string[];
   unparsedChat: string[];
   /** Ids of documents this run created; updates may only target these. */
   owned: Set<string>;
   creatures?: Array<{ uuid: string; count: number }>;
   encounterPlaced?: boolean;
+  playlistId?: string;
 }
 
 interface Step {
@@ -75,7 +82,13 @@ const HELP = `Usage: just smoke-live --yes [--only step,step]
 
 Runs the live smoke suite against the real Foundry world. Writes only documents
 named "${TEST_NAME}" and undoes everything afterwards.
-Requires FOUNDRY_WRITE_ENABLED=true in the server env and --yes.`;
+Requires FOUNDRY_WRITE_ENABLED=true in the server env and --yes.
+
+Steps: create_actor, create_scene, place_group, fit_grid, token_hp, hp_persisted,
+undo_hp, request_rest, tables, macro, audio, journal, effects, items, canvas,
+combat_edit, encounter, place_encounter.
+Deliberately not covered (they disturb connected players): scene activate/update
+and item use.`;
 
 const say = (s = '') => console.log(s);
 const assert = (cond: unknown, msg: string): void => {
@@ -260,47 +273,79 @@ return { token: t ?? null, actor: a ?? null };`,
   },
   {
     name: 'undo_hp',
-    desc: 'damage 3 on the token, undo that write, fresh session sees the HP from before',
+    desc: 'undo damage on a token with an hp override (restores it) and on a fresh token without one (override removed)',
     requires: ['hp_persisted'],
     run: async (ctx) => {
-      const readHp = async (): Promise<number | undefined> => {
+      const sceneId = ctx.st.sceneId as string;
+      const readToken = async (tokenId: string) => {
         const fresh = await ctx.freshSession();
         try {
           const res = await fresh.call('foundry_script', {
             action: 'run',
             dry_run: false,
-            code: `const s = await foundry.get('Scene', ${JSON.stringify(ctx.st.sceneId)});
+            code: `const s = await foundry.get('Scene', ${JSON.stringify(sceneId)});
 const list = Array.isArray(s.tokens) ? s.tokens : Object.values(s.tokens ?? {});
-const t = list.find(t => (t.id ?? t._id) === ${JSON.stringify(ctx.st.tokenId)});
-return { token: t ?? null };`,
+const t = list.find(t => (t.id ?? t._id) === ${JSON.stringify(tokenId)});
+const a = await foundry.get('Actor', ${JSON.stringify(ctx.st.actorId)});
+return { token: t ?? null, delta: t?.delta ?? null, actor: a ?? null };`,
           });
           assert(!res.isError, `fresh read failed: ${res.text.slice(0, 300)}`);
-          const { token } = parseScriptResult<{ token: unknown }>(res.text);
-          return extractHp(token)?.value;
+          const r = parseScriptResult<{ token: unknown; delta: unknown; actor: unknown }>(res.text);
+          assert(r.token, `token ${tokenId} not found from a fresh session`);
+          return r;
         } finally {
           fresh.close();
         }
       };
-      const target = ctx.st.tokenId as string;
-      assert(ctx.st.owned.has(target), 'token is not owned by this run');
-      const before = await readHp();
+      const damageAndUndo = async (target: string): Promise<string> => {
+        assert(ctx.st.owned.has(target), 'token is not owned by this run');
+        await ctx.ok('foundry_actors_edit', { action: 'damage', amount: 3, target, sceneId });
+        const log = await ctx.s.call('foundry_history', { action: 'log', limit: 20 });
+        assert(!log.isError, `history log failed: ${log.text.slice(0, 300)}`);
+        const write = parseWriteLog(log.text).find(
+          (e) => e.type === 'ActorDelta' && e.action === 'update' && !e.undone && !e.undoOf,
+        );
+        assert(write, 'the damage write (ActorDelta update) is not in the history log');
+        await ctx.ok('foundry_history_edit', { action: 'undo', write_id: write?.id });
+        return write?.id as string;
+      };
+
+      // (1) a token that already has an hp override: undo restores the previous override.
+      const first = ctx.st.tokenId as string;
+      const before = extractHp((await readToken(first)).token)?.value;
       assert(typeof before === 'number', 'no token hp before the damage');
-      await ctx.ok('foundry_actors_edit', {
-        action: 'damage',
-        amount: 3,
-        target,
-        sceneId: ctx.st.sceneId,
-      });
-      const log = await ctx.s.call('foundry_history', { action: 'log', limit: 20 });
-      assert(!log.isError, `history log failed: ${log.text.slice(0, 300)}`);
-      const write = parseWriteLog(log.text).find(
-        (e) => e.type === 'ActorDelta' && e.action === 'update' && !e.undone && !e.undoOf,
-      );
-      assert(write, 'the damage write (ActorDelta update) is not in the history log');
-      await ctx.ok('foundry_history_edit', { action: 'undo', write_id: write?.id });
-      const after = await readHp();
+      const w1 = await damageAndUndo(first);
+      const after = extractHp((await readToken(first)).token)?.value;
       assert(after === before, `hp after undo is ${after}, expected ${before}`);
-      return `hp ${before} restored after undoing ${write?.id}`;
+
+      // (2) a fresh token with no hp override: undo REMOVES the override (does not write the base).
+      await ctx.ok('foundry_tokens_edit', {
+        action: 'place_group',
+        scene: sceneId,
+        actors: [{ ref: ctx.st.actorId, count: 1 }],
+        area: { x: 0, y: 5, width: 3, height: 3 },
+      });
+      const tokens = await ctx.script<Array<{ id: string; actorId: string }>>(
+        `const s = await foundry.get('Scene', ${JSON.stringify(sceneId)});
+const list = Array.isArray(s.tokens) ? s.tokens : Object.values(s.tokens ?? {});
+return list.map(t => ({ id: t.id ?? t._id, actorId: t.actorId }));`,
+      );
+      const second = tokens.find((t) => t.actorId === ctx.st.actorId && t.id !== first);
+      assert(second?.id, `second token not found on scene: ${JSON.stringify(tokens)}`);
+      ctx.st.token2Id = second?.id as string;
+      ctx.st.owned.add(second?.id as string);
+      const pre = await readToken(second?.id as string);
+      assert(!deltaHasHpValue(pre.delta), 'fresh token unexpectedly already has an hp override');
+      const baseBefore = extractHp(pre.actor)?.value;
+      const w2 = await damageAndUndo(second?.id as string);
+      const post = await readToken(second?.id as string);
+      assert(
+        !deltaHasHpValue(post.delta),
+        `token delta still has system.attributes.hp.value after undo: ${JSON.stringify(post.delta).slice(0, 200)}`,
+      );
+      const baseAfter = extractHp(post.actor)?.value;
+      assert(baseAfter === baseBefore, `base actor hp changed ${baseBefore} -> ${baseAfter}`);
+      return `override ${before} restored (${w1}); fresh token override removed, base hp still ${baseAfter} (${w2})`;
     },
   },
   {
@@ -368,6 +413,253 @@ return { token: t ?? null };`,
         command: '/roll 1d6',
       });
       return 'macro created';
+    },
+  },
+  {
+    name: 'audio',
+    desc: 'playlist + 2 volume-0 sounds, play A/B, stop A by name, stop playlist; nothing playing afterwards',
+    run: async (ctx) => {
+      const nameA = `${TEST_NAME} (sound A)`;
+      const nameB = `${TEST_NAME} (sound B)`;
+      const created = await ctx.ok('foundry_audio_edit', {
+        action: 'create_playlist',
+        name: TEST_NAME,
+        mode: 'simultaneous',
+      });
+      const pid = extractLabeledId(created.text, 'ID');
+      assert(pid, `no playlist id in output: ${created.text.slice(0, 200)}`);
+      ctx.st.owned.add(pid as string);
+      // volume 0 is mandatory: playback reaches every connected client.
+      for (const [name, path] of [
+        [nameA, 'sounds/dice.wav'],
+        [nameB, 'sounds/notify.wav'],
+      ] as const) {
+        await ctx.ok('foundry_audio_edit', {
+          action: 'add_sound',
+          playlist: pid,
+          name,
+          path,
+          volume: 0,
+        });
+      }
+      const rows = async (): Promise<string> => {
+        const r = await ctx.ok('foundry_audio', { action: 'list', playlist: pid });
+        return r.text;
+      };
+      const rowOf = (text: string, name: string) => text.split('\n').find((l) => l.includes(`**${name}**`));
+      const detail0 = await rows();
+      assert(rowOf(detail0, nameA) && rowOf(detail0, nameB), `sounds not listed: ${detail0.slice(0, 300)}`);
+      assert(/vol 0\b/.test(rowOf(detail0, nameA) ?? ''), 'sound A volume is not 0');
+
+      await ctx.ok('foundry_audio_edit', { action: 'play', playlist: pid, sound: nameA });
+      await ctx.ok('foundry_audio_edit', { action: 'play', playlist: pid, sound: nameB });
+      const both = await rows();
+      assert(rowOf(both, nameA)?.includes('PLAYING'), 'sound A is not playing');
+      assert(rowOf(both, nameB)?.includes('PLAYING'), 'sound B is not playing');
+
+      // Regression: a playlist update used to wipe cached sound names, so stop-by-name failed.
+      const stopA = await ctx.ok('foundry_audio_edit', { action: 'stop', playlist: pid, sound: nameA });
+      assert(stopA.text.includes(nameA), `stop by name output lacks the sound name: ${stopA.text.slice(0, 200)}`);
+      const afterA = await rows();
+      assert(!rowOf(afterA, nameA)?.includes('PLAYING'), 'sound A still playing after stop');
+      assert(rowOf(afterA, nameB)?.includes('PLAYING'), 'sound B stopped too (should still play)');
+
+      await ctx.ok('foundry_audio_edit', { action: 'stop', playlist: pid });
+      const end = await rows();
+      assert(!end.includes('PLAYING'), `something still playing: ${end.slice(0, 300)}`);
+      const all = await ctx.ok('foundry_audio', { action: 'list', query: TEST_NAME });
+      assert(!all.text.includes('PLAYING'), 'playlist list still shows PLAYING');
+      return 'A/B played, A stopped by name, playlist stopped, nothing playing';
+    },
+  },
+  {
+    name: 'journal',
+    desc: 'journals_edit create with one page, replace the page, read back via foundry_journals',
+    run: async (ctx) => {
+      const created = await ctx.ok('foundry_journals_edit', {
+        action: 'create',
+        name: TEST_NAME,
+        pages: [{ name: 'Page one', content: '<p>smoke-first</p>' }],
+      });
+      const jid = extractLabeledId(created.text, 'ID');
+      assert(jid, `no journal id in output: ${created.text.slice(0, 200)}`);
+      ctx.st.owned.add(jid as string);
+      const g1 = await ctx.ok('foundry_journals', { action: 'get', journalId: jid });
+      assert(g1.text.includes('smoke-first'), `created page text missing: ${g1.text.slice(0, 300)}`);
+      await ctx.ok('foundry_journals_edit', {
+        action: 'replace_page',
+        journal: jid,
+        page: 'Page one',
+        content: '<p>smoke-second</p>',
+      });
+      const g2 = await ctx.ok('foundry_journals', { action: 'get', journalId: jid });
+      assert(g2.text.includes('smoke-second'), `updated text missing: ${g2.text.slice(0, 300)}`);
+      assert(!g2.text.includes('smoke-first'), 'old page text still present');
+      return `journal ${jid} page updated`;
+    },
+  },
+  {
+    name: 'effects',
+    desc: 'effects_edit create / disable / enable / delete on the test actor, read back',
+    requires: ['create_actor'],
+    run: async (ctx) => {
+      const actor = ctx.st.actorId as string;
+      const created = await ctx.ok('foundry_effects_edit', {
+        action: 'create',
+        actor,
+        name: TEST_NAME,
+        changes: [{ key: 'system.attributes.ac.bonus', type: 'add', value: 1 }],
+      });
+      const eid = extractLabeledId(created.text, 'ID');
+      assert(eid, `no effect id in output: ${created.text.slice(0, 200)}`);
+      ctx.st.owned.add(eid as string);
+      const effectLine = async (): Promise<string | undefined> => {
+        const l = await ctx.ok('foundry_effects_edit', { action: 'list', actor });
+        return l.text.split('\n').find((x) => x.includes(eid as string));
+      };
+      const l1 = await effectLine();
+      assert(l1 && !l1.includes('disabled'), `effect not listed as enabled: ${l1}`);
+      await ctx.ok('foundry_effects_edit', { action: 'update', actor, effect: eid, disabled: true });
+      assert((await effectLine())?.includes('disabled'), 'effect not disabled after update');
+      await ctx.ok('foundry_effects_edit', { action: 'update', actor, effect: eid, disabled: false });
+      const l3 = await effectLine();
+      assert(l3 && !l3.includes('disabled'), 'effect not re-enabled');
+      // foundry_actors get must still work with an effect on the actor.
+      await ctx.ok('foundry_actors', { action: 'get', actorId: actor });
+      const viaScript = await ctx.script<Array<{ id: string; name: string }>>(
+        `const a = await foundry.get('Actor', ${JSON.stringify(actor)});
+const fx = Array.isArray(a.effects) ? a.effects : Object.values(a.effects ?? {});
+return fx.map(e => ({ id: e.id ?? e._id, name: e.name }));`,
+      );
+      assert(viaScript.some((e) => e.id === eid), `effect not on the actor document: ${JSON.stringify(viaScript)}`);
+      await ctx.ok('foundry_effects_edit', { action: 'delete', actor, effect: eid });
+      assert((await effectLine()) === undefined, 'effect still listed after delete');
+      return `effect ${eid} created, toggled, deleted`;
+    },
+  },
+  {
+    name: 'items',
+    desc: 'items_edit add_to_actor / update_on_actor (item name shown) / remove_from_actor',
+    requires: ['create_actor'],
+    run: async (ctx) => {
+      const actorId = ctx.st.actorId as string;
+      const added = await ctx.ok('foundry_items_edit', {
+        action: 'add_to_actor',
+        actorId,
+        source: { type: 'inline', item: { type: 'loot', name: TEST_NAME, system: {} } },
+      });
+      const iid = extractLabeledId(added.text, 'Item ID');
+      assert(iid, `no item id in output: ${added.text.slice(0, 200)}`);
+      ctx.st.owned.add(iid as string);
+      const countItems = async (): Promise<number> => {
+        const r = await ctx.script<Array<{ id: string }>>(
+          `const a = await foundry.get('Actor', ${JSON.stringify(actorId)});
+const items = Array.isArray(a.items) ? a.items : Object.values(a.items ?? {});
+return items.filter(i => i.name === ${JSON.stringify(TEST_NAME)}).map(i => ({ id: i.id ?? i._id }));`,
+        );
+        return r.filter((x) => x.id === iid).length;
+      };
+      assert((await countItems()) === 1, 'item not found on the actor after add');
+      const upd = await ctx.ok('foundry_items_edit', {
+        action: 'update_on_actor',
+        actorId,
+        itemId: iid,
+        patch: { description: { value: '<p>smoke</p>' } },
+      });
+      // Regression: the output used to read "undefined (undefined)".
+      assert(upd.text.includes(`**Item:** ${TEST_NAME}`), `update output lacks the item name: ${upd.text.slice(0, 200)}`);
+      assert(!upd.text.includes('undefined'), `update output contains "undefined": ${upd.text.slice(0, 200)}`);
+      await ctx.ok('foundry_items_edit', { action: 'remove_from_actor', actorId, itemId: iid });
+      assert((await countItems()) === 0, 'item still on the actor after remove');
+      return `item ${iid} added, updated, removed`;
+    },
+  },
+  {
+    name: 'canvas',
+    desc: 'canvas_edit add 2 walls + a region on the test scene, list with offset paging, delete them',
+    requires: ['create_scene'],
+    run: async (ctx) => {
+      const scene = ctx.st.sceneId as string;
+      const w = await ctx.ok('foundry_canvas_edit', {
+        action: 'add_walls',
+        scene,
+        walls: [
+          { x1: 1, y1: 1, x2: 4, y2: 1 },
+          { x1: 1, y1: 2, x2: 4, y2: 2 },
+        ],
+      });
+      const wallIds = extractBacktickIds(w.text);
+      assert(wallIds.length === 2, `expected 2 wall ids, got ${wallIds.length}: ${w.text.slice(0, 200)}`);
+      const rg = await ctx.ok('foundry_canvas_edit', {
+        action: 'add_region',
+        scene,
+        name: TEST_NAME,
+        shapes: [{ type: 'rectangle', x: 5, y: 1, width: 2, height: 2 }],
+      });
+      const regionId = extractLabeledId(rg.text, 'ID');
+      assert(regionId, `no region id in output: ${rg.text.slice(0, 200)}`);
+
+      const p1 = await ctx.ok('foundry_canvas', { action: 'list', scene, kind: 'walls', limit: 1, offset: 0 });
+      const p2 = await ctx.ok('foundry_canvas', { action: 'list', scene, kind: 'walls', limit: 1, offset: 1 });
+      const f1 = parsePageFooter(p1.text);
+      const f2 = parsePageFooter(p2.text);
+      assert(f1?.total === 2 && f1.nextOffset === 1, `page 1 footer unexpected: ${p1.text.slice(-120)}`);
+      assert(f2?.from === 2 && f2.nextOffset === undefined, `page 2 footer unexpected: ${p2.text.slice(-120)}`);
+      const seen = [...extractBacktickIds(p1.text), ...extractBacktickIds(p2.text)].sort();
+      assert(seen.join() === [...wallIds].sort().join(), `paged ids ${seen} differ from created ${wallIds}`);
+
+      const regions = await ctx.ok('foundry_canvas', { action: 'list', scene, kind: 'regions' });
+      assert(regions.text.includes(regionId as string), 'region not listed');
+
+      await ctx.ok('foundry_canvas_edit', { action: 'remove_walls', scene, walls: wallIds });
+      await ctx.ok('foundry_canvas_edit', { action: 'remove_region', scene, region: regionId });
+      const w0 = await ctx.ok('foundry_canvas', { action: 'list', scene, kind: 'walls' });
+      const r0 = await ctx.ok('foundry_canvas', { action: 'list', scene, kind: 'regions' });
+      assert(extractBacktickIds(w0.text).length === 0, `walls remain: ${w0.text.slice(0, 200)}`);
+      assert(!r0.text.includes(regionId as string), 'region remains after remove');
+      return '2 walls + region added, paged 1+1, removed';
+    },
+  },
+  {
+    name: 'combat_edit',
+    desc: 'combat_edit start (test scene token), next_turn, end; previously active combat is active again',
+    requires: ['place_group'],
+    run: async (ctx) => {
+      const activeCombats = () =>
+        ctx.script<string[]>(
+          `const list = await foundry.list('Combat', { limit: 200 });
+const out = [];
+for (const d of list) { const c = await foundry.get('Combat', d.id ?? d._id); if (c.active === true) out.push(c.id ?? c._id ?? d.id ?? d._id); }
+return out.sort();`,
+        );
+      const before = await activeCombats();
+      const started = await ctx.ok('foundry_combat_edit', {
+        action: 'start',
+        sceneId: ctx.st.sceneId,
+        tokenIds: [ctx.st.tokenId],
+      });
+      const cid = extractLabeledId(started.text, 'Encounter');
+      assert(cid, `no encounter id in output: ${started.text.slice(0, 200)}`);
+      ctx.st.owned.add(cid as string);
+      // Guard: end/next_turn act on "the active combat"; make sure that is OURS before touching it.
+      const state = await ctx.ok('foundry_combat', { action: 'state' });
+      assert(
+        state.text.includes(TEST_NAME),
+        `active combat is not the test combat; refusing next_turn/end. State: ${state.text.slice(0, 300)}`,
+      );
+      const turn = await ctx.ok('foundry_combat_edit', { action: 'next_turn' });
+      assert(/Round/.test(turn.text), `next_turn output unexpected: ${turn.text.slice(0, 200)}`);
+      const ended = await ctx.ok('foundry_combat_edit', { action: 'end' });
+      assert(ended.text.includes(cid as string), `end removed a different combat: ${ended.text.slice(0, 200)}`);
+      // Deleting the active combat leaves none active (live finding); `end` re-activates
+      // the combats its `start` switched off.
+      if (before.length > 0) {
+        assert(ended.text.includes('Re-activated combat'), `end did not re-activate: ${ended.text.slice(0, 300)}`);
+      }
+      const after = await activeCombats();
+      assert(!after.includes(cid as string), 'test combat still exists after end');
+      assert(after.join() === before.join(), `active combats [${after}] differ from before [${before}]`);
+      return `combat ${cid} started, advanced, ended; active combats restored (${before.length})`;
     },
   },
   {
