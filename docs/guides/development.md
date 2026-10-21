@@ -52,6 +52,26 @@ npm run lint
 npm run test:e2e
 ```
 
+### Live smoke suite
+
+`just smoke-live --yes` runs a scripted end-to-end check against the REAL Foundry world
+through the built server (the same path Claude Desktop uses). It reads the server env from
+the Claude Desktop config and refuses to run unless `FOUNDRY_WRITE_ENABLED=true` there and
+`--yes` is passed. It prints what it will do first.
+
+It writes to the live world, but only documents named exactly `MCP TEST — delete me`
+(plus the actors and folder `place_encounter` imports, which the undo removes). Steps:
+create a test actor and scene (`foundry_script`), `place_group`, `fit_grid`, damage /
+temp HP / heal on an unlinked token and a read-back from a fresh server process,
+`request_rest`, a no-replacement roll table with `draw_table` and `reset_table`,
+`create_macro`, `foundry_generate encounter`, and `place_encounter` with `start_combat`.
+It aborts if any `MCP TEST` document already exists. Cleanup always runs (also on failure
+or Ctrl-C): every write made during the run is undone newest first with
+`foundry_history_edit undo`, then it checks the world search, document ids and the active
+combat match the state before the run. Anything it cannot undo is printed with type, id
+and name for manual deletion. `--only create_actor,place_group` runs a subset (with the
+steps they need). Not part of CI or `npm test`.
+
 ### Smoke tests
 
 Two smoke tests verify the server boots end-to-end without a live FoundryVTT.
