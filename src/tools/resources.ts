@@ -60,7 +60,7 @@ export const resourceDefinitions = [
   {
     uri: 'foundry://system/diagnostics',
     name: 'System Diagnostics',
-    description: 'System health and diagnostic information (requires REST API module)',
+    description: 'System health and diagnostic information',
     mimeType: 'application/json',
   },
 ];

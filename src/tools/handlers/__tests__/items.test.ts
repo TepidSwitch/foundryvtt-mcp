@@ -17,7 +17,6 @@ interface MockItem {
 interface MockSearchParams {
   query: string;
   type?: string;
-  rarity?: string;
   limit: number;
 }
 
@@ -66,16 +65,12 @@ describe('handleSearchItems', () => {
         limit: 10,
       });
 
-      const result = await handleSearchItems(
-        { query: 'sword', type: 'weapon', rarity: 'Common' },
-        client,
-      );
+      const result = await handleSearchItems({ query: 'sword', type: 'weapon' }, client);
       const text = getText(result);
 
       expect(text).toContain('Item Search Results');
       expect(text).toContain('**Query:** sword');
       expect(text).toContain('**Type Filter:** weapon');
-      expect(text).toContain('**Rarity Filter:** Common');
       expect(text).toContain('**Results:** 2/2 total');
       expect(text).toContain('**Longsword** (weapon) - Common - 15 gp');
       expect(text).toContain('**Potion of Healing** (consumable) - Common - 50 gp');
@@ -86,12 +81,11 @@ describe('handleSearchItems', () => {
       expect(calls.params[0]).toMatchObject({
         query: 'sword',
         type: 'weapon',
-        rarity: 'Common',
         limit: 10,
       });
     });
 
-    it('defaults query/type/rarity labels when none supplied and uses default limit 10', async () => {
+    it('defaults query/type labels when none supplied and uses default limit 10', async () => {
       const { client, calls } = mockFoundryClient({
         items: [],
         total: 0,
@@ -104,7 +98,6 @@ describe('handleSearchItems', () => {
 
       expect(text).toContain('**Query:** All items');
       expect(text).toContain('**Type Filter:** All types');
-      expect(text).toContain('**Rarity Filter:** All rarities');
       // Filters should not be passed when undefined
       expect(calls.params[0]).toEqual({ query: '', limit: 10 });
     });

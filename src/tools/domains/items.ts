@@ -28,11 +28,10 @@ export const itemsTool = new DomainTool({
   actions: {
     search: action({
       description:
-        'Search item documents in the world by name, optionally by type. Returns name, type and rarity (rarity shows "Common" when none is recorded; price is not available). The rarity filter works only in REST API mode (FOUNDRY_API_KEY). Item ids are not printed - read the foundry://items resource.',
+        'Search item documents in the world by name, optionally by type. Returns name, type and rarity (rarity shows "Common" when none is recorded; price is not available). Item ids are not printed - read the foundry://items resource.',
       schema: z.object({
         query: z.string().optional().describe('Search text for item names'),
         type: z.string().optional().describe('Item type filter (weapon, armor, consumable, ...)'),
-        rarity: z.string().optional().describe('Rarity filter (REST API mode only)'),
         limit: z.number().optional().describe('Maximum results (default 10)'),
       }),
       run: (a, ctx) => handleSearchItems(a, ctx.foundryClient),

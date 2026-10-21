@@ -95,9 +95,6 @@ class FoundryMCPServer {
           ? null
           : (config.foundry.auditFile ?? defaultAuditPath()),
     };
-    if (config.foundry.apiKey) {
-      clientConfig.apiKey = config.foundry.apiKey;
-    }
     if (config.foundry.username) {
       clientConfig.username = config.foundry.username;
     }
@@ -106,6 +103,11 @@ class FoundryMCPServer {
     }
     if (config.foundry.userId) {
       clientConfig.userId = config.foundry.userId;
+    }
+    if (process.env.FOUNDRY_API_KEY) {
+      logger.warn(
+        'FOUNDRY_API_KEY is set but ignored: the REST bridge was removed; the server uses Socket.IO with FOUNDRY_USERNAME/FOUNDRY_USER_ID + FOUNDRY_PASSWORD.',
+      );
     }
     this.foundryClient = new FoundryClient(clientConfig);
     this.connection = new ConnectionManager(this.foundryClient);

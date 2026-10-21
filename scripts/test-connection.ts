@@ -7,26 +7,9 @@
 
 // Must precede every other import: see src/load-env.ts (#206).
 import '../src/load-env.js';
-import axios from 'axios';
 import { FoundryClient } from '../src/foundry/client.js';
 import { config } from '../src/config/index.js';
 import { logger } from '../src/utils/logger.js';
-
-/**
- * True when a REST-mode request failed because the target's REST module does
- * not serve the route at all (the bridge's catch-all 404), as opposed to a
- * transport or server error. See issue #194.
- */
-function isRestRouteMissing(error: unknown): boolean {
-  return axios.isAxiosError(error) && error.response?.status === 404;
-}
-
-function printRestRouteMissing(what: string, route: string): void {
-  console.log(`ℹ️  ${what} not exposed by this REST module (404 on ${route}).`);
-  console.log('   The target instance\'s REST module does not serve this endpoint —');
-  console.log('   expected with older/other REST module builds; not a client defect.');
-  console.log('   Actor/scene reads are canonical over Socket.IO: unset FOUNDRY_API_KEY.\n');
-}
 
 async function testConnection() {
   console.log('🧪 FoundryVTT MCP Server - Connection Test\n');
@@ -51,16 +34,11 @@ async function testConnection() {
       console.log(`   Setup Type: 🖥️  Remote/Network`);
     }
     
-    // Transport is selected purely by apiKey presence (client.ts): set → REST
-    // API mode; unset → Socket.IO mode (the default, full worldData path).
-    console.log(`   Transport: ${config.foundry.apiKey ? '🌐 REST API' : '🔌 Socket.IO'}`);
-    console.log(`   API Key: ${config.foundry.apiKey ? '✅ Configured' : '❌ Not set'}`);
     console.log(`   Username: ${config.foundry.username ? '✅ Configured' : '❌ Not set'}\n`);
 
     // Initialize client
     const client = new FoundryClient({
       baseUrl: config.foundry.url,
-      apiKey: config.foundry.apiKey,
       username: config.foundry.username,
       password: config.foundry.password,
       timeout: config.foundry.timeout,
@@ -97,14 +75,10 @@ async function testConnection() {
         });
         console.log('✅ Actor search works!\n');
       } else {
-        console.log('ℹ️  No actors found (may require REST API module)\n');
+        console.log('ℹ️  No actors found\n');
       }
     } catch (error) {
-      if (config.foundry.apiKey && isRestRouteMissing(error)) {
-        printRestRouteMissing('Actor search', 'GET /api/actors');
-      } else {
-        console.log(`⚠️  Actor search limited: ${error instanceof Error ? error.message : error}\n`);
-      }
+      console.log(`⚠️  Actor search limited: ${error instanceof Error ? error.message : error}\n`);
     }
 
     // Test scene info
@@ -115,14 +89,10 @@ async function testConnection() {
       console.log(`   Dimensions: ${scene.width}x${scene.height}`);
       console.log('✅ Scene information works!\n');
     } catch (error) {
-      if (config.foundry.apiKey && isRestRouteMissing(error)) {
-        printRestRouteMissing('Scene info', 'GET /api/scenes/current');
-      } else {
-        console.log(`⚠️  Scene info limited: ${error instanceof Error ? error.message : error}\n`);
-      }
+      console.log(`⚠️  Scene info limited: ${error instanceof Error ? error.message : error}\n`);
     }
 
-    // Test the live Socket.IO connection (no-op equivalent in REST mode)
+    // Test the live Socket.IO connection
     console.log('🔌 Testing Socket.IO connection...');
     try {
       await client.connect();
@@ -141,17 +111,8 @@ async function testConnection() {
     console.log('\n📝 Summary:');
     console.log('   - Basic connection: ✅');
     console.log('   - Dice rolling: ✅');
-    console.log(`   - Data access: ${config.foundry.apiKey ? '🌐 REST (coverage depends on the target module; Socket.IO is the full-data path)' : '✅ Full worldData'}`);
-    console.log(`   - Connection: ${config.foundry.apiKey ? '🌐 REST API' : '🔌 Socket.IO'}`);
-
-    if (!config.foundry.apiKey) {
-      console.log('\n💡 Optional: the "Foundry REST API" module adds the diagnostics + compendium path.');
-      console.log('   1. Install the "Foundry REST API" module in FoundryVTT');
-      console.log('   2. Copy the API key from the module configuration page');
-      console.log('   3. Set FOUNDRY_API_KEY in .env (this switches the client to REST transport)');
-      console.log('   4. Restart the MCP server');
-    }
-
+    console.log('   - Data access: ✅ Full worldData');
+    console.log('   - Connection: 🔌 Socket.IO');
   } catch (error) {
     console.error('❌ Test failed:', error);
     console.log('\n🔧 Troubleshooting:');

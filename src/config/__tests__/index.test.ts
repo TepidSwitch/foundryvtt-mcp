@@ -7,7 +7,6 @@ const mockEnv = {
   LOG_LEVEL: 'debug',
   NODE_ENV: 'test',
   FOUNDRY_URL: 'http://localhost:30000',
-  FOUNDRY_API_KEY: 'test-api-key',
   FOUNDRY_USERNAME: 'testuser',
   FOUNDRY_PASSWORD: 'testpass',
   FOUNDRY_SOCKET_PATH: '/custom/socket.io/',
@@ -56,7 +55,6 @@ describe('Config', () => {
       expect(config.logLevel).toBe('debug');
       expect(config.nodeEnv).toBe('test');
       expect(config.foundry.url).toBe('http://localhost:30000');
-      expect(config.foundry.apiKey).toBe('test-api-key');
       expect(config.foundry.username).toBe('testuser');
       expect(config.foundry.password).toBe('testpass');
       expect(config.foundry.socketPath).toBe('/custom/socket.io/');

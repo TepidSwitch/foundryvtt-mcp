@@ -30,7 +30,7 @@ export const chatTool = new DomainTool({
     }),
     roll: action({
       description:
-        'Roll dice and return the total with a per-term breakdown. Dice terms and whole numbers joined by + or - ("1d20+5", "2d6 + 1d4", "3d6"; "d20" means one die) always work. Multiplication and modifiers such as "4d6kh3" or "1d20r1" are rejected with an error naming the character and position. Parentheses are evaluated only when FOUNDRY_API_KEY is set (Foundry\'s Roll engine); the default Socket.IO transport rolls locally and rejects them, so prefer the expanded form.',
+        'Roll dice and return the total with a per-term breakdown. Dice terms and whole numbers joined by + or - ("1d20+5", "2d6 + 1d4", "3d6"; "d20" means one die) always work. Multiplication and modifiers such as "4d6kh3" or "1d20r1" are rejected with an error naming the character and position. Parentheses are rejected (rolls are evaluated locally), so use the expanded form.',
       schema: z.object({
         formula: z.string().describe('Dice formula, e.g. "1d20+5"'),
         reason: z.string().optional().describe('Optional reason for the roll'),

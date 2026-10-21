@@ -11,7 +11,7 @@
  * corresponding world state isn't populated:
  *   - `foundry://scenes/current` — no active scene
  *   - `foundry://combat`        — no active combat encounter
- *   - `foundry://system/diagnostics` — REST API module not installed
+ *   - `foundry://system/diagnostics` — not populated yet
  *
  * For these the test asserts the graceful-null contract (still a well-formed
  * contents[] entry whose JSON parses successfully) rather than presence of

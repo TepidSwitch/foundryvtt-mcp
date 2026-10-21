@@ -15,10 +15,8 @@ import { config } from '../src/config/index.js';
 
 interface WizardConfig {
   foundryUrl: string;
-  apiKey?: string;
   username?: string;
   password?: string;
-  authMethod: 'api-key' | 'credentials';
 }
 
 class SetupWizard {
@@ -50,19 +48,13 @@ class SetupWizard {
         process.exit(1);
       }
 
-      // Step 3: Choose authentication method
-      await this.chooseAuthMethod();
-
-      // Step 4: Configure authentication
+      // Step 3: Configure credentials
       await this.configureAuthentication();
 
-      // Step 5: Test authentication
-      await this.testAuthentication();
-
-      // Step 6: Generate .env file
+      // Step 4: Generate .env file
       await this.generateEnvFile();
 
-      // Step 7: Run final validation
+      // Step 5: Run final validation
       await this.runFinalValidation();
 
       console.log('\n🎉 Setup completed successfully!');
@@ -70,7 +62,6 @@ class SetupWizard {
       console.log('   1. Run: npm run build');
       console.log('   2. Run: npm start');
       console.log('   3. Connect your AI client to the MCP server');
-      console.log('\n💡 For enhanced features, consider installing the Foundry Local REST API module.');
 
     } catch (error) {
       console.error('\n❌ Setup failed:', error instanceof Error ? error.message : error);
@@ -220,102 +211,17 @@ class SetupWizard {
   }
 
   /**
-   * Choose authentication method
-   */
-  private async chooseAuthMethod(): Promise<void> {
-    console.log('🔐 Step 3: Authentication Method\n');
-    
-    console.log('Choose your authentication method:');
-    console.log('1. API Key (Recommended - requires Foundry Local REST API module)');
-    console.log('2. Username/Password (Basic authentication)\n');
-
-    const choice = await this.question('Enter your choice (1 or 2): ');
-    
-    switch (choice.trim()) {
-      case '1':
-        this.config.authMethod = 'api-key';
-        console.log('📱 Selected: API Key authentication\n');
-        break;
-      case '2':
-        this.config.authMethod = 'credentials';
-        console.log('🔑 Selected: Username/Password authentication\n');
-        break;
-      default:
-        console.log('❌ Invalid choice. Defaulting to API Key method.\n');
-        this.config.authMethod = 'api-key';
-    }
-  }
-
-  /**
-   * Configure authentication details
+   * Collect Socket.IO login credentials
    */
   private async configureAuthentication(): Promise<void> {
-    console.log('⚙️ Step 4: Authentication Configuration\n');
+    console.log('⚙️ Step 3: Credentials\n');
+    console.log('👤 Username/Password Setup:\n');
 
-    if (this.config.authMethod === 'api-key') {
-      console.log('🔧 API Key Setup:');
-      console.log('1. Install the "Foundry Local REST API" module in FoundryVTT');
-      console.log('2. Enable the module in your world settings');
-      console.log('3. Go to Settings → Module Settings → Foundry Local REST API');
-      console.log('4. Enable the REST API and copy the generated API key\n');
+    this.config.username = await this.question('👤 Username: ');
+    this.config.password = await this.questionHidden('🔒 Password: ');
 
-      this.config.apiKey = await this.question('🔑 Enter your API key: ');
-      
-      if (!this.config.apiKey?.trim()) {
-        throw new Error('API key is required for API key authentication');
-      }
-    } else {
-      console.log('👤 Username/Password Setup:\n');
-      
-      this.config.username = await this.question('👤 Username: ');
-      this.config.password = await this.questionHidden('🔒 Password: ');
-      
-      if (!this.config.username?.trim() || !this.config.password?.trim()) {
-        throw new Error('Both username and password are required');
-      }
-    }
-  }
-
-  /**
-   * Test authentication with FoundryVTT
-   */
-  private async testAuthentication(): Promise<void> {
-    console.log('🧪 Step 5: Testing Authentication\n');
-
-    if (!this.config.foundryUrl) {
-      throw new Error('FoundryVTT URL not configured');
-    }
-
-    console.log('Testing authentication...');
-
-    try {
-      if (this.config.authMethod === 'api-key' && this.config.apiKey) {
-        // Test API key by accessing a protected endpoint
-        const response = await axios.get(`${this.config.foundryUrl}/api/status`, {
-          headers: {
-            'x-api-key': this.config.apiKey
-          },
-          timeout: 5000
-        });
-
-        if (response.status === 200) {
-          console.log('✅ API key authentication successful');
-          console.log(`📊 Connected to world: ${response.data.world || 'Unknown'}\n`);
-        }
-      } else if (this.config.authMethod === 'credentials') {
-        // For credentials, we'll just verify they're provided
-        // Full authentication test would require WebSocket connection
-        console.log('✅ Credentials configured (full test will occur at runtime)\n');
-      }
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (error.response?.status === 401) {
-          throw new Error('Authentication failed - check your API key or credentials');
-        } else if (error.response?.status === 404) {
-          throw new Error('REST API endpoints not found - ensure the module is installed and enabled');
-        }
-      }
-      throw new Error(`Authentication test failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    if (!this.config.username?.trim() || !this.config.password?.trim()) {
+      throw new Error('Both username and password are required');
     }
   }
 
@@ -323,7 +229,7 @@ class SetupWizard {
    * Generate .env configuration file
    */
   private async generateEnvFile(): Promise<void> {
-    console.log('📄 Step 6: Generating Configuration\n');
+    console.log('📄 Step 4: Generating Configuration\n');
 
     const envPath = path.join(process.cwd(), '.env');
     const envExamplePath = path.join(process.cwd(), '.env.example');
@@ -339,17 +245,10 @@ class SetupWizard {
     // Configure required variables
     envContent = this.updateEnvVariable(envContent, 'FOUNDRY_URL', this.config.foundryUrl!);
 
-    if (this.config.authMethod === 'api-key' && this.config.apiKey) {
-      envContent = this.updateEnvVariable(envContent, 'FOUNDRY_API_KEY', this.config.apiKey);
-      // Remove credentials if they exist
-      envContent = this.removeEnvVariable(envContent, 'FOUNDRY_USERNAME');
-      envContent = this.removeEnvVariable(envContent, 'FOUNDRY_PASSWORD');
-    } else if (this.config.authMethod === 'credentials') {
-      envContent = this.updateEnvVariable(envContent, 'FOUNDRY_USERNAME', this.config.username!);
-      envContent = this.updateEnvVariable(envContent, 'FOUNDRY_PASSWORD', this.config.password!);
-      // Remove API key if it exists
-      envContent = this.removeEnvVariable(envContent, 'FOUNDRY_API_KEY');
-    }
+    envContent = this.updateEnvVariable(envContent, 'FOUNDRY_USERNAME', this.config.username!);
+    envContent = this.updateEnvVariable(envContent, 'FOUNDRY_PASSWORD', this.config.password!);
+    // A retired REST bridge key is ignored by the server; drop it if present.
+    envContent = this.removeEnvVariable(envContent, 'FOUNDRY_API_KEY');
 
     // Add generation timestamp
     const timestamp = new Date().toISOString();
@@ -364,7 +263,7 @@ class SetupWizard {
    * Run final validation test
    */
   private async runFinalValidation(): Promise<void> {
-    console.log('🎯 Step 7: Final Validation\n');
+    console.log('🎯 Step 5: Final Validation\n');
 
     console.log('Running final connectivity test...');
 

@@ -5,7 +5,7 @@
  * caches worldData in memory, and serves all queries from the snapshot.
  */
 
-import axios, { type AxiosInstance, type AxiosRequestConfig, type AxiosResponse } from 'axios';
+import axios, { type AxiosInstance } from 'axios';
 import FormData from 'form-data';
 import { io, type Socket } from 'socket.io-client';
 import { z } from 'zod';
@@ -70,60 +70,8 @@ const FOUNDRY_ID_PATTERN = /^[a-zA-Z0-9]{16}$/;
 /** Fields Foundry's own getIndex always includes; a socket index read returns only what it asks for. */
 const PACK_INDEX_BASE_FIELDS = ['_id', 'name', 'type', 'img'];
 
-/**
- * Characters a dice formula may contain. A cheap sanity gate, not a grammar:
- * it rejects Foundry modifier syntax (`4d6kh3`), attribute references
- * (`1d20+STR`) and arithmetic this server never forwards (`*`, `/`), while
- * still allowing parentheses through to FoundryVTT's own `Roll` engine on the
- * REST transport. See {@link FoundryClient.rollDice}.
- */
-const DICE_FORMULA_ALPHABET = /^[0-9d\s+\-()]+$/;
-
-/** Single-character form of {@link DICE_FORMULA_ALPHABET}, for locating a violation. */
-const DICE_FORMULA_CHARACTER = /[0-9d\s+\-()]/;
-
-/** Upper bound on formula length, common to both transports. */
+/** Upper bound on formula length. */
 const MAX_DICE_FORMULA_LENGTH = 100;
-
-/**
- * Builds the REST-path rejection for a formula outside the dice alphabet.
- *
- * The local parser cannot be borrowed for this: it rejects parentheses, which
- * REST *does* support, so for `(1d20+5)*2` it would name the wrong problem.
- * This scans for the first character the alphabet does not admit and reports
- * it by name and position, so the REST path is as specific about what it
- * refused as the local one (#219).
- */
-function alphabetViolation(formula: string): Error {
-  if (formula === '') {
-    return new Error('Invalid dice formula: the formula is empty.');
-  }
-  const index = [...formula].findIndex((char) => !DICE_FORMULA_CHARACTER.test(char));
-  if (index === -1) {
-    return new Error(`Invalid dice formula: ${formula}`);
-  }
-  return new Error(
-    `Invalid dice formula "${formula}": unexpected "${formula[index]}" at position ${index}. ` +
-      'Supported syntax: dice terms (NdS, or dS for a single die) and whole numbers, joined by ' +
-      '+ or -, optionally grouped in parentheses.',
-  );
-}
-
-/**
- * True when a rejected request carries an HTTP response — FoundryVTT answered,
- * whatever the status. A rejection without one is a transport failure
- * (connection refused or reset, DNS, timeout): the server is not reachable.
- *
- * Read reflectively rather than cast, so a non-axios rejection cannot be
- * mistaken for a reply.
- */
-function hasHttpResponse(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) {
-    return false;
-  }
-  const response = Reflect.get(error, 'response');
-  return response !== undefined && response !== null;
-}
 
 /**
  * Spacing between sibling `sort` values, mirroring Foundry's
@@ -142,21 +90,6 @@ const SORT_INTEGER_DENSITY = 100000;
  */
 const TOKEN_ACTOR_UUID_PATTERN =
   /^(Actor\.[a-zA-Z0-9]{16}|Scene\.[a-zA-Z0-9]{16}\.Token\.[a-zA-Z0-9]{16}\.(Actor|ActorDelta)\.[a-zA-Z0-9]{16})$/;
-
-/**
- * Minimal Zod schema for the `/api/dice/roll` REST response.
- *
- * The REST module is external input, so the body is validated rather than read
- * off an `any`: a 200 whose payload carries no numeric `total` would otherwise
- * produce a `DiceRoll` with `total: undefined` while the type claims `number`,
- * and `roll_dice` would render that straight to the caller. A body that does
- * not match is treated like any other REST failure and falls through to the
- * local roller.
- */
-const RestDiceRollSchema = z.object({
-  total: z.number(),
-  terms: z.array(z.object({ results: z.array(z.number()).optional() })).optional(),
-});
 
 /**
  * Minimal Zod schema for the WorldData Socket.IO payload.
@@ -180,7 +113,6 @@ const WorldDataSchema = z.object({
 
 export interface FoundryClientConfig {
   baseUrl: string;
-  apiKey?: string;
   username?: string;
   password?: string;
   userId?: string;
@@ -227,7 +159,6 @@ export interface SearchActorsParams {
 export interface SearchItemsParams {
   query?: string;
   type?: string;
-  rarity?: string;
   limit?: number;
 }
 
@@ -235,8 +166,6 @@ export interface CompendiumSearchParams {
   query?: string;
   packType?: string;
   itemType?: string;
-  spellLevel?: number;
-  source?: string;
   compendiumId?: string;
   limit?: number;
   /** Opaque pagination cursor from a prior result's `nextCursor`. */
@@ -270,12 +199,6 @@ export class FoundryClient {
   private sessionCookie: string | null = null;
   /** Id of the user this session is logged in as (from the `session` event). */
   private sessionUserId: string | null = null;
-  /**
-   * Last observed outcome of a REST request: false once one failed to reach
-   * FoundryVTT at all (#217). Unused in Socket.IO mode.
-   */
-  private restLinkLive = true;
-
   constructor(config: FoundryClientConfig) {
     if (!config.baseUrl || config.baseUrl.trim() === '') {
       throw new Error('baseUrl is required and cannot be empty');
@@ -310,48 +233,14 @@ export class FoundryClient {
       validateStatus: (status) => status >= 200 && status < 300,
     });
 
-    if (this.config.apiKey) {
-      this.http.interceptors.request.use((reqConfig) => {
-        reqConfig.headers['x-api-key'] = this.config.apiKey;
-        return reqConfig;
-      });
-
-      // REST mode has no socket to ask about liveness, so every request that
-      // does happen doubles as the probe (#217). See `isConnected()`.
-      this.http.interceptors.response.use(
-        (response) => {
-          this.restLinkLive = true;
-          return response;
-        },
-        (error: unknown) => {
-          this.restLinkLive = hasHttpResponse(error);
-          return Promise.reject(error);
-        },
-      );
-    }
-
-    const mode = this.config.apiKey ? 'REST API' : 'Socket.IO';
-    logger.info(`FoundryVTT client initialized (${mode} mode)`);
+    logger.info('FoundryVTT client initialized (Socket.IO mode)');
   }
 
   /**
    * Connects to FoundryVTT.
-   * REST API mode: tests /api/status endpoint.
-   * Socket.IO mode: authenticates and loads full worldData.
+   * Authenticates over Socket.IO and loads the full worldData.
    */
   async connect(): Promise<void> {
-    if (this.config.apiKey) {
-      try {
-        await this.http.get('/api/status');
-        this._isConnected = true;
-        logger.info('Connected to FoundryVTT via REST API module');
-      } catch (error) {
-        logger.error('Failed to connect via REST API module:', error);
-        throw error;
-      }
-      return;
-    }
-
     const user = this.config.userId || this.config.username;
     if (!user || !this.config.password) {
       throw new Error(
@@ -595,33 +484,20 @@ export class FoundryClient {
     this.worldData = null;
     this.worldDataStale = false;
     this._isConnected = false;
-    this.restLinkLive = true;
     logger.info('FoundryVTT client disconnected');
   }
 
   /**
    * Reports whether the client currently has a live link to FoundryVTT (#217).
    *
-   * Socket.IO mode answers from the socket itself rather than from a latched
+   * Answers from the socket itself rather than from a latched
    * flag, so a link that dropped without an explicit `disconnect()` — server
    * restart, network loss — reads as disconnected immediately, even if the
    * `disconnect` event has not been delivered yet. It tracks the socket in both
    * directions: an automatic reconnect (`onSocketConnect`) reads as connected
    * again rather than staying latched off.
-   *
-   * REST API mode (`FOUNDRY_API_KEY`) has no socket to ask, so it answers from
-   * the last REST request that actually happened: a request that failed to
-   * reach FoundryVTT (connection refused, reset, timed out) reads as
-   * disconnected from then on, and the next request that gets through reads as
-   * connected again. An HTTP error status does not count as a drop — the
-   * server answered. This is a *last observed outcome*, not a live probe: it
-   * cannot notice a server that went away between requests, and it never does
-   * I/O of its own, because this accessor is synchronous and widely called.
    */
   isConnected(): boolean {
-    if (this.config.apiKey) {
-      return this._isConnected && this.restLinkLive;
-    }
     return this._isConnected && this.socket?.connected === true;
   }
 
@@ -760,11 +636,6 @@ export class FoundryClient {
     this.worldDataStale = this.worldData !== null;
   }
 
-  /** True when the REST API module (FOUNDRY_API_KEY) is configured. */
-  hasRestApi(): boolean {
-    return Boolean(this.config.apiKey);
-  }
-
   /** Epoch ms of the last full world snapshot load, or null if none yet. */
   getWorldDataLoadedAt(): number | null {
     return this.worldDataLoadedAt;
@@ -840,13 +711,6 @@ export class FoundryClient {
   // ==========================================================================
 
   async searchActors(params: SearchActorsParams): Promise<ActorSearchResult> {
-    if (this.config.apiKey) {
-      return this.executeWithRetry(async () => {
-        const response = await this.http.get('/api/actors', { params });
-        return response.data;
-      });
-    }
-
     if (!this.worldData) {
       return { actors: [], total: 0, page: 1, limit: params.limit || 10 };
     }
@@ -874,13 +738,6 @@ export class FoundryClient {
     if (!FOUNDRY_ID_PATTERN.test(actorId)) {
       throw new Error(`Invalid actorId format: ${actorId}`);
     }
-    if (this.config.apiKey) {
-      return this.executeWithRetry(async () => {
-        const response = await this.http.get(`/api/actors/${actorId}`);
-        return response.data;
-      });
-    }
-
     if (!this.worldData) {
       throw new Error('Not connected — no world data available');
     }
@@ -907,7 +764,7 @@ export class FoundryClient {
    * `currency.gp`, `spells.spell1.value`, `attributes.exhaustion`). Each key is
    * prefixed with `system.` and sent through the Socket.IO `modifyDocument`
    * write protocol as an `Actor` `update` — matching FoundryVTT's own document
-   * model (`Actor#update`). No REST call and no `apiKey` are involved.
+   * model (`Actor#update`).
    *
    * Client-side validation, using the actor's current data, rejects:
    *  - HP value exceeding `max + temp`,
@@ -1017,13 +874,6 @@ export class FoundryClient {
   // ==========================================================================
 
   async searchItems(params: SearchItemsParams): Promise<ItemSearchResult> {
-    if (this.config.apiKey) {
-      return this.executeWithRetry(async () => {
-        const response = await this.http.get('/api/items', { params });
-        return response.data;
-      });
-    }
-
     if (!this.worldData) {
       return { items: [], total: 0, page: 1, limit: params.limit || 10 };
     }
@@ -1078,48 +928,22 @@ export class FoundryClient {
   /**
    * Searches FoundryVTT compendium packs by name and metadata.
    *
-   * Compendium data is not present in the cached worldData snapshot, so this
-   * read requires the REST API module (FOUNDRY_API_KEY). When the key is
-   * absent it returns a graceful empty result with `restAvailable: false`
-   * rather than throwing, mirroring the no-worldData behaviour of
-   * {@link searchItems}/{@link searchActors}; the handler surfaces a note
-   * explaining why no results were returned.
+   * Compendium packs are not in the cached worldData snapshot, so this reads the
+   * pack indexes over Socket.IO. Before world data has loaded it returns an empty
+   * result rather than throwing, mirroring {@link searchItems}/{@link searchActors}.
    */
   async searchCompendium(params: CompendiumSearchParams): Promise<CompendiumSearchResult> {
     const limit = params.limit ?? 20;
     const offset = decodeCursor(params.cursor);
 
-    if (this.config.apiKey) {
-      return this.executeWithRetry(async () => {
-        // Translate the opaque cursor into a wire offset for the bridge.
-        const { cursor: _cursor, ...rest } = params;
-        const response = await this.http.get('/api/compendium/search', {
-          params: { ...rest, limit, offset },
-        });
-        const data = (
-          isRecord(response.data) ? response.data : {}
-        ) as Partial<CompendiumSearchResult>;
-        const results = data.results ?? [];
-        const total = typeof data.total === 'number' ? data.total : results.length;
-        const nextOffset = offset + results.length;
-        return {
-          results,
-          total,
-          page: Math.floor(offset / limit) + 1,
-          limit,
-          restAvailable: true,
-          nextCursor: nextOffset < total ? encodeCursor(nextOffset) : null,
-        };
-      });
-    }
     if (this.worldData) {
       return this.searchCompendiumIndex(params, limit, offset);
     }
-    return { results: [], total: 0, page: 1, limit, restAvailable: false, nextCursor: null };
+    return { results: [], total: 0, page: 1, limit, worldLoaded: false, nextCursor: null };
   }
 
   // ==========================================================================
-  // Compendium reads over Socket.IO (no REST module needed)
+  // Compendium reads over Socket.IO
   //
   // FoundryVTT's own client reads compendium documents with the same
   // `modifyDocument` socket event using `action: 'get'` and `operation.pack`.
@@ -1321,7 +1145,7 @@ export class FoundryClient {
       total,
       page: Math.floor(offset / limit) + 1,
       limit,
-      restAvailable: true,
+      worldLoaded: true,
       nextCursor: nextOffset < total ? encodeCursor(nextOffset) : null,
     };
   }
@@ -2276,14 +2100,6 @@ export class FoundryClient {
     if (sceneId !== undefined && !FOUNDRY_ID_PATTERN.test(sceneId)) {
       throw new Error(`Invalid sceneId format: ${sceneId}`);
     }
-    if (this.config.apiKey) {
-      return this.executeWithRetry(async () => {
-        const endpoint = sceneId ? `/api/scenes/${sceneId}` : '/api/scenes/current';
-        const response = await this.http.get(endpoint);
-        return response.data;
-      });
-    }
-
     if (!this.worldData) {
       throw new Error('Not connected — no world data available');
     }
@@ -2315,13 +2131,6 @@ export class FoundryClient {
   // ==========================================================================
 
   async getWorldInfo(): Promise<FoundryWorld> {
-    if (this.config.apiKey) {
-      return this.executeWithRetry(async () => {
-        const response = await this.http.get('/api/world');
-        return response.data;
-      });
-    }
-
     if (!this.worldData) {
       return {
         id: 'unknown',
@@ -2534,60 +2343,14 @@ export class FoundryClient {
   /**
    * Rolls a dice formula.
    *
-   * Validation is deliberately **per transport**, because the two transports
-   * are not equally capable (#219):
-   *
-   *  - **REST (`FOUNDRY_API_KEY`)** posts the formula to `/api/dice/roll`,
-   *    where FoundryVTT's own `Roll` engine evaluates it. That engine
-   *    understands more than this module does — parentheses, for one — so only
-   *    the `DICE_FORMULA_ALPHABET` check applies here. Imposing the local
-   *    parser's narrower grammar would take away a capability the transport
-   *    has. What the alphabet does refuse is refused by name and position
-   *    (`unexpected "k" at position 3`, via `alphabetViolation`), so the
-   *    two transports are equally specific about what they would not evaluate.
-   *  - **Socket.IO / no API key** has no remote evaluator: `fallbackDiceRoll`
-   *    is the roller, so the grammar its parser can represent is the grammar
-   *    accepted, and that parser is the *only* gate. No alphabet pre-check runs
-   *    ahead of it, so its specific message (`unexpected "k" at position 3`)
-   *    reaches the caller instead of a generic `Invalid dice formula: 4d6kh3`.
-   *    Nothing is ever dropped from a total in silence.
-   *
-   * The length cap is common to both. A REST roll that cannot reach FoundryVTT
-   * falls through to the local roller, which then applies the strict grammar —
-   * a formula only Foundry could evaluate errors out rather than being
-   * mis-totalled locally.
+   * `fallbackDiceRoll` is the only roller, so the grammar its parser can represent
+   * is the grammar accepted, and that parser is the only gate. Its specific message
+   * (`unexpected "k" at position 3`) reaches the caller; nothing is ever dropped
+   * from a total in silence (#219). Only the length cap is checked ahead of it.
    */
   async rollDice(formula: string, reason?: string): Promise<DiceRoll> {
     if (typeof formula !== 'string' || formula.length > MAX_DICE_FORMULA_LENGTH) {
       throw new Error(`Invalid dice formula: ${formula}`);
-    }
-
-    if (this.config.apiKey) {
-      if (!formula || !DICE_FORMULA_ALPHABET.test(formula)) {
-        throw alphabetViolation(formula);
-      }
-
-      try {
-        const response = await this.http.post('/api/dice/roll', {
-          formula,
-          flavor: reason,
-        });
-
-        const rolled = RestDiceRollSchema.parse(response.data);
-
-        const result: DiceRoll = {
-          formula,
-          total: rolled.total,
-          breakdown: rolled.terms?.map((term) => term.results?.join(', ')).join(' + ') || formula,
-          timestamp: new Date().toISOString(),
-        };
-        if (reason) {
-          result.reason = reason;
-        }
-        return result;
-      } catch {
-        // Fall through to local roll
-      }
     }
 
     return this.fallbackDiceRoll(formula, reason);
@@ -2632,65 +2395,6 @@ export class FoundryClient {
       logger.error('Failed to connect to FoundryVTT:', error);
       throw error;
     }
-  }
-
-  // ==========================================================================
-  // HTTP helpers (preserved for REST API mode and diagnostics)
-  // ==========================================================================
-
-  private async executeWithRetry<T>(operation: () => Promise<T>): Promise<T> {
-    let lastError: Error | undefined;
-    const maxAttempts = (this.config.retryAttempts || 3) + 1;
-    const baseDelay = this.config.retryDelay || 1000;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        return await operation();
-      } catch (error) {
-        lastError = error as Error;
-
-        if (axios.isAxiosError(error)) {
-          const status = error.response?.status;
-          if (status && status >= 400 && status < 500 && status !== 429) {
-            throw lastError;
-          }
-        }
-
-        if (attempt === maxAttempts) {
-          throw lastError;
-        }
-
-        const exponentialDelay = baseDelay * 2 ** (attempt - 1);
-        const jitter = Math.random() * 0.1 * exponentialDelay;
-        await new Promise((resolve) => setTimeout(resolve, exponentialDelay + jitter));
-      }
-    }
-
-    throw lastError || new Error('Request failed after all retry attempts');
-  }
-
-  async get<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
-    return this.executeWithRetry(() => this.http.get(url, config));
-  }
-
-  async post<T = unknown>(
-    url: string,
-    data?: unknown,
-    config?: AxiosRequestConfig,
-  ): Promise<AxiosResponse<T>> {
-    return this.executeWithRetry(() => this.http.post(url, data, config));
-  }
-
-  async put<T = unknown>(
-    url: string,
-    data?: unknown,
-    config?: AxiosRequestConfig,
-  ): Promise<AxiosResponse<T>> {
-    return this.executeWithRetry(() => this.http.put(url, data, config));
-  }
-
-  async delete<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
-    return this.executeWithRetry(() => this.http.delete(url, config));
   }
 }
 
@@ -2797,7 +2501,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * Returns the `system` object of an actor-like document, accepting either the
- * raw REST/world document (`{ ..., system }`) or a cached {@link WorldActor}.
+ * raw world document (`{ ..., system }`) or a cached {@link WorldActor}.
  * Returns undefined when no system object is present (e.g. the mapped
  * {@link FoundryActor} produced by the socket world-cache path).
  */
@@ -2902,9 +2606,9 @@ function validateAttributePatch(
   actor: FoundryActor,
   rawSystem: Record<string, unknown> | undefined,
 ): void {
-  // Prefer the raw `system` document for bounds: in REST mode getActor returns
-  // the raw document (HP at system.attributes.hp.{value,max,temp}); the mapped
-  // FoundryActor.hp is only populated on the socket world-cache path.
+  // Prefer the raw `system` document for bounds: the mapped
+  // FoundryActor.hp may be absent, while the raw document always carries
+  // system.attributes.hp.{value,max,temp}.
   const rawHp = rawSystem ? extractNested(rawSystem, 'attributes', 'hp') : undefined;
   const hp = isRecord(rawHp) ? rawHp : undefined;
 

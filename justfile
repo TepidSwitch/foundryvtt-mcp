@@ -188,7 +188,6 @@ setup-env:
     FOUNDRY_URL=http://localhost:30000
     FOUNDRY_USERNAME=admin
     FOUNDRY_PASSWORD=admin
-    # FOUNDRY_API_KEY=your-api-key-here
     # FOUNDRY_USER_ID=
     LOG_LEVEL=info
     ENVEOF

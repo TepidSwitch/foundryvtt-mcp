@@ -55,8 +55,6 @@ Not every new function needs a unit test. Match the test to what the code does:
   mutation**. When no mutable actor / world is available they `ctx.skip()`
   rather than fail — matching the live-world precondition of the other
   integration specs.
-- The bridge/REST path is **read-only**; `search_compendium` integration
-  coverage is blocked on the bridge implementing `/api/compendium/search`.
 - CI runs this tier only once the `FOUNDRY_*` secrets are configured (issue #140).
 
 ## Coverage areas

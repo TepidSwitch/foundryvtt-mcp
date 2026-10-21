@@ -19,7 +19,7 @@ describe('Compendium handlers', () => {
     total: 1,
     page: 1,
     limit: 20,
-    restAvailable: true,
+    worldLoaded: true,
     nextCursor: null,
   };
 
@@ -55,7 +55,7 @@ describe('Compendium handlers', () => {
     it('passes filters through to the client', async () => {
       const mockClient = createMockClient();
       await handleSearchCompendium(
-        { query: 'Divine Smite', filters: { compendiumId: 'dnd5e.spells', spellLevel: 1 } },
+        { query: 'Divine Smite', filters: { compendiumId: 'dnd5e.spells', itemType: 'spell' } },
         mockClient,
       );
 
@@ -63,25 +63,25 @@ describe('Compendium handlers', () => {
         expect.objectContaining({
           query: 'Divine Smite',
           compendiumId: 'dnd5e.spells',
-          spellLevel: 1,
+          itemType: 'spell',
         }),
       );
     });
 
-    it('surfaces a REST-required note on graceful empty', async () => {
+    it('says so when world data has not loaded yet', async () => {
       const mockClient = createMockClient({
         results: [],
         total: 0,
         page: 1,
         limit: 20,
-        restAvailable: false,
+        worldLoaded: false,
         nextCursor: null,
       });
       const result = await handleSearchCompendium({ query: 'Divine Smite' }, mockClient);
 
       const text = result.content[0].text;
       expect(text).toContain('No compendium entries found');
-      expect(text).toContain('requires FOUNDRY_API_KEY');
+      expect(text).toContain('world data has not loaded yet');
     });
 
     it('surfaces the next-page cursor when more results remain', async () => {
