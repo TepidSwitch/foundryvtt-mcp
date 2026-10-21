@@ -36,6 +36,16 @@ const CHARLIE = 'charliecharlie11';
 type Fake = ReturnType<typeof fakeFoundry>;
 type Row = Record<string, unknown>;
 
+const SCENE_ID = 'ssssssssssssssss';
+const TOKEN_A = 'tokenaaaaaaaaaaa';
+const TOKEN_B = 'tokenbbbbbbbbbbb';
+const makeScene = (active: boolean, tokens: Row[]) => ({
+  _id: SCENE_ID,
+  name: 'Battlefield',
+  active,
+  tokens,
+});
+
 const setup = (world: { combats?: WorldCombat[]; scenes?: Row[] } = {}, config: Row = {}): Fake =>
   fakeFoundry({ world, config });
 const serverCombat = (f: Fake, id = COMBAT_ID) => f.world.combats?.find((c) => c._id === id);
@@ -219,16 +229,6 @@ describe('next_turn', () => {
 });
 
 describe('start_combat', () => {
-  const SCENE_ID = 'ssssssssssssssss';
-  const TOKEN_A = 'tokenaaaaaaaaaaa';
-  const TOKEN_B = 'tokenbbbbbbbbbbb';
-  const makeScene = (active: boolean, tokens: Row[]) => ({
-    _id: SCENE_ID,
-    name: 'Battlefield',
-    active,
-    tokens,
-  });
-
   it('seeds combatants from explicit tokenIds, resolving actorId from the token', async () => {
     const f = setup({
       scenes: [makeScene(true, [{ _id: TOKEN_A, actorId: 'actoraaaaaaaaaaa' }, { _id: TOKEN_B }])],
@@ -304,6 +304,25 @@ describe('end_combat', () => {
     expect(text).toContain('Combat Ended');
     expect(text).toContain(COMBAT_ID);
     expect(f.world.combats).toEqual([]);
+  });
+
+  it('re-activates the combat that starting this one switched off', async () => {
+    // Live finding: deleting the new active combat leaves no combat active.
+    const f = setup({ combats: [makeCombat()], scenes: [makeScene(true, [{ _id: TOKEN_A }])] });
+    await handleStartCombat({}, f.client);
+    const text = textOf(await handleEndCombat({}, f.client));
+    expect(text).toContain(`Re-activated combat \`${COMBAT_ID}\``);
+    expect(f.world.combats?.map((c) => [c._id, c.active])).toEqual([[COMBAT_ID, true]]);
+  });
+
+  it('re-activates nothing when another combat became active meanwhile', async () => {
+    const f = setup({ combats: [makeCombat()], scenes: [makeScene(true, [{ _id: TOKEN_A }])] });
+    await handleStartCombat({}, f.client);
+    const started = f.client.getCombatState()?._id as string;
+    await handleStartCombat({}, f.client); // the second start deactivates the first
+    await f.client.endCombat(started);
+    expect(f.world.combats?.find((c) => c._id === COMBAT_ID)?.active).toBe(false);
+    expect(f.world.combats?.filter((c) => c.active)).toHaveLength(1);
   });
 
   it('raises McpError when there is no active combat', async () => {

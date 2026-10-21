@@ -123,7 +123,11 @@ export async function handleEndCombat(
   }
 
   return withToolError('end combat', async () => {
-    await foundryClient.endCombat(combat._id);
+    const { reactivated } = await foundryClient.endCombat(combat._id);
+    const restored =
+      reactivated.length > 0
+        ? `\nRe-activated combat ${reactivated.map((id) => `\`${id}\``).join(', ')}, which starting this one had switched off.`
+        : '';
 
     return {
       content: [
@@ -131,7 +135,7 @@ export async function handleEndCombat(
           type: 'text',
           text: `⚔️ **Combat Ended**
 **Encounter:** ${combat._id}
-The active combat encounter has been removed.`,
+The active combat encounter has been removed.${restored}`,
         },
       ],
     };

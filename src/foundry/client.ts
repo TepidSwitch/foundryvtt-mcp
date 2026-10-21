@@ -1611,13 +1611,33 @@ export class FoundryClient {
    *
    * @param combatId - 16-char alphanumeric Combat document id
    */
-  async endCombat(combatId: string): Promise<void> {
+  async endCombat(combatId: string): Promise<{ reactivated: string[] }> {
     this.assertWriteable();
     if (!FOUNDRY_ID_PATTERN.test(combatId)) {
       throw new Error(`Invalid combatId format: ${combatId}`);
     }
     await this.modifyDocument('Combat', 'delete', { ids: [combatId] });
+
+    // Starting this combat as active made Foundry deactivate the ones that were
+    // active, and deleting it does not bring them back (seen live). Restore
+    // them, unless another combat became active in the meantime.
+    const previous = this.combatsDeactivatedBy.get(combatId) ?? [];
+    this.combatsDeactivatedBy.delete(combatId);
+    const combats = this.worldData?.combats ?? [];
+    if (previous.length === 0 || combats.some((c) => c.active)) {
+      return { reactivated: [] };
+    }
+    const reactivated = previous.filter((id) => combats.some((c) => c._id === id));
+    if (reactivated.length > 0) {
+      await this.modifyDocument('Combat', 'update', {
+        updates: reactivated.map((id) => ({ _id: id, active: true })),
+      });
+    }
+    return { reactivated };
   }
+
+  /** Combats that were active when this process started a combat, by new combat id. */
+  private combatsDeactivatedBy = new Map<string, string[]>();
 
   /**
    * Sets a combatant's initiative (FR-018).
@@ -1686,6 +1706,7 @@ export class FoundryClient {
       }
     }
 
+    const wasActive = (this.worldData?.combats ?? []).filter((c) => c.active).map((c) => c._id);
     const created = await this.modifyDocument('Combat', 'create', {
       data: [{ scene: sceneId, active: true }],
     });
@@ -1693,6 +1714,9 @@ export class FoundryClient {
     const combatId = combat?._id;
     if (!combatId) {
       throw new Error('FoundryVTT did not return a Combat id after create');
+    }
+    if (wasActive.length > 0) {
+      this.combatsDeactivatedBy.set(combatId, wasActive);
     }
 
     if (combatants.length > 0) {
