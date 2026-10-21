@@ -129,6 +129,78 @@ describe('handleGenerateEncounter', () => {
   });
 });
 
+describe('handleGenerateEncounter party resources', () => {
+  const hurt = [
+    {
+      _id: 'PC1',
+      name: 'Fighter',
+      type: 'character',
+      items: [
+        {
+          _id: 'c1',
+          type: 'class',
+          name: 'Fighter',
+          system: { levels: 10, hd: { denomination: 'd10', spent: 6 } },
+        },
+      ],
+      system: { attributes: { hp: { value: 52, max: 100, temp: 5 } } },
+    },
+    {
+      _id: 'PC2',
+      name: 'Wizard',
+      type: 'character',
+      items: [
+        {
+          _id: 'c2',
+          type: 'class',
+          name: 'Wizard',
+          system: {
+            levels: 10,
+            hd: { denomination: 'd6', spent: 0 },
+            spellcasting: { progression: 'full' },
+          },
+        },
+      ],
+      system: {
+        attributes: { hp: { value: 0, max: 50 }, exhaustion: 2 },
+        spells: {
+          spell1: { value: 0 },
+          spell2: { value: 0 },
+          spell3: { value: 0 },
+          spell4: { value: 0 },
+          spell5: { value: 0 },
+        },
+      },
+    },
+  ];
+  it('always prints the party state and leaves the budget alone by default', async () => {
+    const c = client({ actors: hurt });
+    const out = text(await handleGenerateEncounter({ difficulty: 'moderate' }, c.mock));
+    expect(out).toContain('Fighter: HP 52/100 (52%) +5 temp · no slots · hit dice 4/10');
+    expect(out).toContain('Wizard: HP 0/50 (0%)');
+    expect(out).toContain('slots 0/15');
+    expect(out).toContain('Unconscious (0 HP)');
+    expect(out).toContain('Exhaustion 2');
+    expect(out).toContain('Party average: HP 26% · slots 0% · hit dice 70%');
+    expect(out).toContain('budget 4600 XP (2024');
+    expect(out).toContain('consider a short rest');
+  });
+  it('scales the budget when account_for_resources is set', async () => {
+    const c = client({ actors: hurt });
+    const out = text(
+      await handleGenerateEncounter(
+        { difficulty: 'moderate', account_for_resources: true },
+        c.mock,
+      ),
+    );
+    // mean(0.26, 0, 0.7) = 0.32 -> factor 0.66
+    expect(out).toContain(
+      'budget 4600 XP → 3036 XP (party at 26% HP, 0% slots, 70% hit dice: ×0.66)',
+    );
+    expect(out).not.toContain('consider a short rest');
+  });
+});
+
 describe('handlePlaceEncounter', () => {
   const base = {
     scene: 'Hall',

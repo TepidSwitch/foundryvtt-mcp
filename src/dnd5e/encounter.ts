@@ -266,3 +266,71 @@ export function buildOptions(
     return true;
   });
 }
+
+// ---------------------------------------------------------------------------
+// Party resources
+// ---------------------------------------------------------------------------
+
+/** One character's current resources (all values already computed, not stored). */
+export interface MemberState {
+  name: string;
+  hp: number;
+  /** null when the maximum cannot be determined. */
+  maxHp: number | null;
+  temp: number;
+  /** Spell slots left / total (all levels plus pact); total 0 means no slots. */
+  slotsLeft: number;
+  slotsMax: number;
+  hdLeft: number;
+  hdMax: number;
+  notes: string[];
+}
+
+const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
+
+/** HP fraction 0-1 (0 at 0 HP); null when the max is unknown. Temp HP is not counted. */
+export function hpFraction(m: MemberState): number | null {
+  return m.maxHp && m.maxHp > 0 ? clamp01(m.hp / m.maxHp) : null;
+}
+export function slotFraction(m: MemberState): number | null {
+  return m.slotsMax > 0 ? clamp01(m.slotsLeft / m.slotsMax) : null;
+}
+export function hitDiceFraction(m: MemberState): number | null {
+  return m.hdMax > 0 ? clamp01(m.hdLeft / m.hdMax) : null;
+}
+
+function mean(values: Array<number | null>): number | null {
+  const v = values.filter((x): x is number => x !== null);
+  return v.length > 0 ? v.reduce((a, b) => a + b, 0) / v.length : null;
+}
+
+export interface PartySummary {
+  hp: number | null;
+  slots: number | null;
+  hitDice: number | null;
+}
+
+/** Party averages of each fraction; slots only over characters that have slots. */
+export function summarizeParty(members: MemberState[]): PartySummary {
+  return {
+    hp: mean(members.map(hpFraction)),
+    slots: mean(members.map(slotFraction)),
+    hitDice: mean(members.map(hitDiceFraction)),
+  };
+}
+
+/**
+ * Budget scale for a depleted party: clamp(0.5 + 0.5 * mean(HP, slots, hit dice), 0.5, 1).
+ * Reasoning: a party at full resources gets the full budget; a fully drained one
+ * still gets half (never zero, they can still fight), and in between it falls
+ * linearly. The three terms are equally weighted; a term nobody has (no casters,
+ * no known max HP) is dropped. Characters at 0 HP count as 0 in the HP term.
+ */
+export function resourceFactor(summary: PartySummary): number {
+  const terms = [summary.hp, summary.slots, summary.hitDice].filter((x): x is number => x !== null);
+  if (terms.length === 0) {
+    return 1;
+  }
+  const m = terms.reduce((a, b) => a + b, 0) / terms.length;
+  return Math.min(1, Math.max(0.5, 0.5 + 0.5 * m));
+}

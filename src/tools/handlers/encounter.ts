@@ -16,13 +16,20 @@ import {
   type Difficulty,
   dropLegacyDuplicates,
   type EncounterOption,
+  hitDiceFraction,
+  hpFraction,
+  type MemberState,
   partyBudget,
+  resourceFactor,
+  slotFraction,
+  summarizeParty,
 } from '../../dnd5e/encounter.js';
 import type { FoundryClient } from '../../foundry/client.js';
 import { squareToPixels } from '../../foundry/import.js';
 import type { WorldActor } from '../../foundry/types.js';
 import { resolveActor } from './character.js';
-import { at, buildSheet, formatCr, isRec, parseCr, str } from './dnd5e.js';
+import { at, buildSheet, formatCr, isRec, num, parseCr, str } from './dnd5e.js';
+import { buildEffectiveSheet } from './effects.js';
 import { ensureFolder } from './folders.js';
 import {
   type GroupArea,
@@ -64,21 +71,64 @@ export interface GenerateEncounterArgs {
   packs?: string[] | undefined;
   seed?: number | undefined;
   legacy?: boolean | undefined;
+  account_for_resources?: boolean | undefined;
 }
 
-function partyLevels(client: FoundryClient, refs: string[] | undefined): number[] {
+function partyActors(client: FoundryClient, refs: string[] | undefined): WorldActor[] {
   if (refs && refs.length > 0) {
-    return refs.map((r) => buildSheet(resolveActor(client, r)).level);
+    return refs.map((r) => resolveActor(client, r));
   }
   const snapshot = snapshotOf(client);
-  const levels: number[] = [];
+  const actors: WorldActor[] = [];
   for (const user of snapshot.users.filter((u) => u.character)) {
     const actor = snapshot.actors.find((a) => a._id === user.character);
     if (actor) {
-      levels.push(buildSheet(actor).level);
+      actors.push(actor);
     }
   }
-  return levels;
+  return actors;
+}
+
+/** Current resources of one character, computed from source data (never stored maxima). */
+function memberState(actor: WorldActor): MemberState {
+  const s = buildEffectiveSheet(actor);
+  const sc = s.spellcasting;
+  const slotsLeft = sc.slots.reduce((n, x) => n + x.value, 0) + (sc.pact?.value ?? 0);
+  const slotsMax = sc.slots.reduce((n, x) => n + x.max, 0) + (sc.pact?.max ?? 0);
+  const hdMax = s.classes.reduce((n, c) => n + c.levels, 0);
+  const hdLeft = s.classes.reduce((n, c) => n + Math.max(0, c.levels - c.hdSpent), 0);
+  const exhaustion = num(at(s.actor.system, 'attributes', 'exhaustion'));
+  const notes = s.effects.current.map((e) => e.name);
+  if (s.hp.value <= 0 && !notes.some((n) => /unconscious/i.test(n))) {
+    notes.unshift('Unconscious (0 HP)');
+  }
+  if (exhaustion > 0) {
+    notes.push(`Exhaustion ${exhaustion}`);
+  }
+  return {
+    name: actor.name,
+    hp: s.hp.value,
+    maxHp: s.hp.max,
+    temp: s.hp.temp,
+    slotsLeft,
+    slotsMax,
+    hdLeft,
+    hdMax,
+    notes,
+  };
+}
+
+const pct = (f: number | null) => (f === null ? 'n/a' : `${Math.round(f * 100)}%`);
+
+function describePartyState(members: MemberState[]): string {
+  const lines = members.map((m) => {
+    const hp = `HP ${m.hp}/${m.maxHp ?? '?'} (${pct(hpFraction(m))})${m.temp ? ` +${m.temp} temp` : ''}`;
+    const slots = m.slotsMax > 0 ? `slots ${m.slotsLeft}/${m.slotsMax}` : 'no slots';
+    const hd = `hit dice ${m.hdLeft}/${m.hdMax}`;
+    return `- ${m.name}: ${hp} · ${slots} · ${hd}${m.notes.length > 0 ? ` · ⚠ ${m.notes.join(', ')}` : ''}`;
+  });
+  const sum = summarizeParty(members);
+  return `**Party state**\n${lines.join('\n')}\nParty average: HP ${pct(sum.hp)} · slots ${pct(sum.slots)} · hit dice ${pct(sum.hitDice)}`;
 }
 
 export interface NpcEntry extends Candidate {
@@ -188,14 +238,26 @@ place_encounter creatures: \`${creatures}\``;
 
 export async function handleGenerateEncounter(args: GenerateEncounterArgs, client: FoundryClient) {
   return withToolError('generate encounter', async () => {
-    const levels = partyLevels(client, args.party);
+    const actors = partyActors(client, args.party);
+    const levels = actors.map((a) => buildSheet(a).level);
     if (levels.length === 0) {
       throw new McpError(
         ErrorCode.InvalidParams,
         'No party found: no user has an assigned character. Pass party as actor ids or names.',
       );
     }
-    const budget = partyBudget(levels, args.difficulty);
+    const baseBudget = partyBudget(levels, args.difficulty);
+    const members = actors.map(memberState);
+    const summary = summarizeParty(members);
+    const factor = args.account_for_resources ? resourceFactor(summary) : 1;
+    const budget = args.account_for_resources ? Math.round(baseBudget * factor) : baseBudget;
+    const budgetText = args.account_for_resources
+      ? `budget ${baseBudget} XP → ${budget} XP (party at ${pct(summary.hp)} HP${summary.slots === null ? '' : `, ${pct(summary.slots)} slots`}, ${pct(summary.hitDice)} hit dice: ×${factor.toFixed(2)})`
+      : `budget ${budget} XP`;
+    const lowHint =
+      !args.account_for_resources && summary.hp !== null && summary.hp < 0.5
+        ? '\nParty is low on HP: consider a short rest (foundry_actors_edit request_rest) or account_for_resources: true.'
+        : '';
     const maxCreatures = args.max_creatures ?? 6;
     const packIds = actorPackIds(client, args.packs);
 
@@ -212,8 +274,8 @@ export async function handleGenerateEncounter(args: GenerateEncounterArgs, clien
     const seed = args.seed ?? Math.floor(Math.random() * 1_000_000);
     const options = buildOptions(candidates, budget, maxCreatures, seed);
 
-    const head = `🐉 **Encounter options** — ${args.difficulty} for ${levels.length} character${levels.length === 1 ? '' : 's'} (levels ${levels.join(', ')}) · budget ${budget} XP (2024 rules: monster XP is summed, no multiplier)
-Searched ${candidates.length} monster${candidates.length === 1 ? '' : 's'} in ${packIds.length} pack${packIds.length === 1 ? '' : 's'}${args.creature_type ? ` · type ${args.creature_type}` : ''}${args.environment ? ` · environment ${args.environment}` : ''} · ${args.legacy ? 'legacy statblocks kept' : '2024 statblocks preferred'} · max ${maxCreatures} creatures · seed ${seed}`;
+    const head = `🐉 **Encounter options** — ${args.difficulty} for ${levels.length} character${levels.length === 1 ? '' : 's'} (levels ${levels.join(', ')}) · ${budgetText} (2024 rules: monster XP is summed, no multiplier)
+Searched ${candidates.length} monster${candidates.length === 1 ? '' : 's'} in ${packIds.length} pack${packIds.length === 1 ? '' : 's'}${args.creature_type ? ` · type ${args.creature_type}` : ''}${args.environment ? ` · environment ${args.environment}` : ''} · ${args.legacy ? 'legacy statblocks kept' : '2024 statblocks preferred'} · max ${maxCreatures} creatures · seed ${seed}\n\n${describePartyState(members)}${lowHint}`;
     const notes = [
       skipped.length > 0 ? `Skipped packs: ${skipped.join('; ')}` : '',
       args.environment && !habitatKnown

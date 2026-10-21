@@ -132,7 +132,7 @@ Roll tables: `foundry_tables_edit` changes the tables and their rows. `foundry_c
 
 NPC finder: `foundry_generate npc` searches the Actor compendiums (read-only) by `query`, `cr` (nearest first), `cr_min`/`cr_max`, `creature_type`, `environment`, `packs`, `limit` (default 10, max 50) and lists name, CR, type, habitats, pack and the Compendium uuid. It replaces the old random-text generator (`level`/`race`/`class` are gone). 2024 statblocks win over "(Legacy)" twins unless `legacy: true`, which `encounter` accepts too.
 
-Encounters: `foundry_generate encounter` proposes a set of monsters for the party by CR and XP budget. It creates nothing. `foundry_tokens_edit place_encounter` turns that output into imported actors, tokens and optionally combat, as one undo step.
+Encounters: `foundry_generate encounter` proposes a set of monsters for the party by CR and XP budget. It creates nothing. `foundry_tokens_edit place_encounter` turns that output into imported actors, tokens and optionally combat, as one undo step. The encounter output always starts with a Party state block (per character HP, temp HP, spell/pact slots, hit dice, conditions, plus party averages, all computed from source data). `account_for_resources: true` scales the XP budget by clamp(0.5 + 0.5 × mean(HP, slots among casters, hit dice fractions), 0.5, 1) and prints the factor; the default leaves budgets unchanged.
 
 Positions for notes, lights and tokens are grid squares from the top-left of the map image. Roll requests and item cards post dnd5e inline enrichers (`[[/check ...]]`, `[[/save ...]]`, `[[/item ...]]`) that players click in chat; no Foundry module is needed.
 
