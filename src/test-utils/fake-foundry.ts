@@ -73,6 +73,8 @@ const EMBEDDED_FIELD: Record<string, string> = {
   Wall: 'walls',
   Drawing: 'drawings',
   Note: 'notes',
+  // Scene.lights holds AmbientLight documents (Foundry's collection name).
+  AmbientLight: 'lights',
   Tile: 'tiles',
   Region: 'regions',
   Combatant: 'combatants',

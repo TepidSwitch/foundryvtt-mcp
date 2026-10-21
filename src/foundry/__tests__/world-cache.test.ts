@@ -216,6 +216,39 @@ describe('applyDocumentBroadcast — prototype pollution', () => {
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
   });
 
+  it('does not pollute Object.prototype through a dot-path key', () => {
+    const world = buildWorldData();
+    applyDocumentBroadcast(world, broadcast());
+    applyDocumentBroadcast(world, {
+      type: 'JournalEntry',
+      action: 'update',
+      result: [
+        { _id: JOURNAL_ID, '__proto__.polluted': 'yes', 'constructor.prototype.polluted': 'yes' },
+      ],
+    });
+
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it('does not pollute Object.prototype through an unlinked token delta', () => {
+    const world = buildWorldData();
+    (world.scenes as unknown as Array<Record<string, unknown>>).push({
+      _id: 'SCENEPPPPPPPPPPP',
+      tokens: [{ _id: 'TOKENPPPPPPPPPPP', actorLink: false }],
+    });
+    applyDocumentBroadcast(world, {
+      type: 'ActorDelta',
+      action: 'update',
+      parentUuid: 'Scene.SCENEPPPPPPPPPPP.Token.TOKENPPPPPPPPPPP',
+      result: [
+        { _id: 'TOKENPPPPPPPPPPP', '__proto__.polluted': 'yes' },
+        JSON.parse('{"_id": "TOKENPPPPPPPPPPP", "__proto__": {"polluted": "yes"}}') as unknown,
+      ],
+    });
+
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
   it('does not pollute Object.prototype through a create payload', () => {
     const world = buildWorldData();
     applyDocumentBroadcast(world, {
