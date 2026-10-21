@@ -34,6 +34,12 @@ export interface AuditEntry {
   updates?: Array<Record<string, unknown>>;
   /** Previous source docs (updates/deletes), when cached and not too large. */
   before?: Array<Record<string, unknown>>;
+  /**
+   * ActorDelta updates only: for each update, the BASE actor's current value at
+   * every leaf the update touched (nested, `_id` = token id). Used by undo to
+   * restore a leaf the delta did not override before.
+   */
+  baseValues?: Array<Record<string, unknown>>;
   dryRun?: boolean;
   undone?: boolean;
   /** Set on the entry produced by an undo; points at the entry it reverted. */
@@ -97,6 +103,66 @@ function getPath(obj: unknown, path: string): unknown {
   return cur;
 }
 
+/** Dot paths of every leaf (non-object value) of a nested object, skipping `_id`. */
+export function leafPaths(obj: Record<string, unknown>, prefix = ''): string[] {
+  const out: string[] = [];
+  for (const [key, value] of Object.entries(obj)) {
+    if (!prefix && key === '_id') {
+      continue;
+    }
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      out.push(...leafPaths(value as Record<string, unknown>, path));
+    } else {
+      out.push(path);
+    }
+  }
+  return out;
+}
+
+function setPath(obj: Record<string, unknown>, path: string, value: unknown): void {
+  const parts = path.split('.');
+  let cur = obj;
+  for (const part of parts.slice(0, -1)) {
+    const next = cur[part];
+    if (typeof next === 'object' && next !== null) {
+      cur = next as Record<string, unknown>;
+    } else {
+      const created: Record<string, unknown> = {};
+      cur[part] = created;
+      cur = created;
+    }
+  }
+  cur[parts[parts.length - 1] as string] = value;
+}
+
+/**
+ * Nested restore for an ActorDelta update (never dot-path keys: Foundry accepts
+ * them on an ActorDelta but persists nothing). Per leaf the update touched:
+ *  - the delta had an override before -> restore that value;
+ *  - it did not (the base actor's value was showing) -> write the BASE ACTOR's
+ *    current value (`baseValues`). The visible value is correct again, but the
+ *    delta keeps an override equal to the base, so a later change to the base
+ *    actor will not show through on that token. A true removal would need a
+ *    nested ForcedDeletion on a delta, which is unverified live; it is only used
+ *    as a last resort when the base value is unknown too.
+ */
+function planDeltaRestore(
+  update: Record<string, unknown>,
+  before: Record<string, unknown>,
+  base: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const restore: Record<string, unknown> = { _id: update._id };
+  for (const path of leafPaths(update)) {
+    let value = getPath(before, path);
+    if (value === undefined && base) {
+      value = getPath(base, path);
+    }
+    setPath(restore, path, value === undefined ? { ...FORCED_DELETION } : structuredClone(value));
+  }
+  return restore;
+}
+
 /** Builds the operation(s) that reverse an entry, or an explanation why not. */
 export function planUndo(
   entry: AuditEntry,
@@ -146,6 +212,16 @@ export function planUndo(
     const before = entry.before.find((b) => b._id === update._id);
     if (!before) {
       return { ok: false, reason: `previous state of ${String(update._id)} was not cached` };
+    }
+    if (entry.type === 'ActorDelta') {
+      restores.push(
+        planDeltaRestore(
+          update,
+          before,
+          entry.baseValues?.find((b) => b._id === update._id),
+        ),
+      );
+      continue;
     }
     const restore: Record<string, unknown> = { _id: update._id };
     for (const key of Object.keys(update)) {

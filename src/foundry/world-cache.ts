@@ -520,6 +520,20 @@ export function findCachedDocuments(
   ids: string[],
   parentUuid?: string,
 ): Array<Record<string, unknown>> {
+  // An unlinked token's ActorDelta is the token's own `delta` (parent
+  // `Scene.<sid>.Token.<tid>`, `_id` = token id), not an array element.
+  const deltaParent = /^Scene\.([^.]+)\.Token\.([^.]+)$/.exec(parentUuid ?? '');
+  if (type === 'ActorDelta' && deltaParent) {
+    const scene = worldData.scenes.find((sc) => sc._id === deltaParent[1]);
+    const token = (
+      scene as unknown as { tokens?: Array<Record<string, unknown>> } | undefined
+    )?.tokens?.find((t) => t._id === deltaParent[2]);
+    if (!token || !ids.includes(deltaParent[2] as string)) {
+      return [];
+    }
+    const delta = isRecord(token.delta) ? structuredClone(token.delta) : {};
+    return [{ ...delta, _id: deltaParent[2] }];
+  }
   let collection: unknown;
   if (parentUuid) {
     const resolved = resolveParent(worldData, parentUuid);
