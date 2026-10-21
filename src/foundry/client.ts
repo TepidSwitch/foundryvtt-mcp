@@ -61,6 +61,9 @@ import { type AuditEntry, fakeDocumentId, namesOf, planUndo, WriteAudit } from '
 /** FoundryVTT document IDs are 16-character alphanumeric strings. */
 const FOUNDRY_ID_PATTERN = /^[a-zA-Z0-9]{16}$/;
 
+/** How long a full world snapshot may take to arrive. */
+const WORLD_SNAPSHOT_TIMEOUT_MS = 30_000;
+
 /** Fields Foundry's own getIndex always includes; a socket index read returns only what it asks for. */
 const PACK_INDEX_BASE_FIELDS = ['_id', 'name', 'type', 'img'];
 
@@ -647,45 +650,36 @@ export class FoundryClient {
   // ==========================================================================
 
   /**
-   * Re-emits 'world' on the existing socket to refresh the cached snapshot.
+   * Re-requests the world snapshot on the existing socket.
    *
-   * Registers a one-shot 'world' listener and cleans it up on every exit
-   * path (success, error, timeout) via `socket.off()` so that repeated
-   * refreshes over a long-running session do not leak listener handles.
+   * Foundry answers `world` through the acknowledgement callback, exactly as on
+   * the initial load; it never emits a separate `world` event (verified live:
+   * waiting for one always timed out, which also broke the resync after every
+   * reconnect).
    */
   async refreshWorldData(): Promise<void> {
     if (!this.socket?.connected) {
       throw new Error('Not connected — cannot refresh world data');
     }
 
+    // The snapshot is large (~25 MB on the live world, ~4 s), so allow longer
+    // than an ordinary request.
+    const timeoutMs = Math.max(this.config.timeout ?? 0, WORLD_SNAPSHOT_TIMEOUT_MS);
     this.worldData = await new Promise<WorldData>((resolve, reject) => {
-      const cleanup = () => {
-        this.socket?.off('world', onWorld);
-      };
-
       const timeoutId = setTimeout(() => {
-        cleanup();
-        reject(new Error('Refresh timeout'));
-      }, this.config.timeout ?? 15000);
+        reject(new Error(`Refresh timeout (${timeoutMs / 1000}s)`));
+      }, timeoutMs);
 
-      const onWorld = (data: WorldData) => {
-        cleanup();
+      this.socket?.emit('world', (data: WorldData) => {
         clearTimeout(timeoutId);
-        try {
-          const parsed = WorldDataSchema.safeParse(data);
-          if (!parsed.success) {
-            logger.warn('WorldData refresh failed schema validation — proceeding with raw data', {
-              issues: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
-            });
-          }
-          resolve(data);
-        } catch (err) {
-          reject(err as Error);
+        const parsed = WorldDataSchema.safeParse(data);
+        if (!parsed.success) {
+          logger.warn('WorldData refresh failed schema validation — proceeding with raw data', {
+            issues: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
+          });
         }
-      };
-
-      this.socket?.once('world', onWorld);
-      this.socket?.emit('world');
+        resolve(data);
+      });
     });
 
     this.worldDataStale = false;

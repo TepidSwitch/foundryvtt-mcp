@@ -222,76 +222,54 @@ describe('FoundryClient', () => {
     });
   });
 
-  describe('refreshWorldData listener cleanup', () => {
-    /**
-     * Builds a minimal mock socket that records `once`/`off`/`emit` calls and
-     * lets the test trigger the registered 'world' handler manually.
-     */
-    function buildMockSocket() {
-      const listeners = new Map<string, (...args: unknown[]) => void>();
+  describe('refreshWorldData', () => {
+    const SNAPSHOT = {
+      userId: 'test-user',
+      actors: [{ _id: 'AAAAAAAAAAAAAAAA', name: 'Fresh' }],
+      scenes: [],
+      items: [],
+      journal: [],
+      messages: [],
+      combats: [],
+      users: [],
+      activeUsers: [],
+      macros: [],
+      playlists: [],
+      tables: [],
+      folders: [],
+    };
+
+    it('reads the snapshot from the world acknowledgement, as Foundry answers it', async () => {
+      // Live finding: Foundry replies to `world` only through the ack callback;
+      // waiting for a separate `world` event always timed out.
+      client = new FoundryClient({ baseUrl: 'http://localhost:30000' });
       const socket = {
         connected: true,
-        once: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-          listeners.set(event, handler);
-          return socket;
+        emit: vi.fn((event: string, ack?: (data: unknown) => void) => {
+          if (event === 'world') {
+            ack?.(SNAPSHOT);
+          }
         }),
-        off: vi.fn((event: string, _handler: (...args: unknown[]) => void) => {
-          listeners.delete(event);
-          return socket;
-        }),
-        emit: vi.fn(),
-        disconnect: vi.fn(),
       };
-      return { socket, listeners };
-    }
-
-    it('removes the world listener on the success path', async () => {
-      client = new FoundryClient({ baseUrl: 'http://localhost:30000', timeout: 50 });
-      const { socket, listeners } = buildMockSocket();
-      // Inject the mock socket — bypasses the real Socket.IO connect path.
       (client as unknown as { socket: typeof socket }).socket = socket;
 
-      const refresh = client.refreshWorldData();
+      await client.refreshWorldData();
 
-      // Trigger the 'world' event handler with a minimal valid WorldData payload.
-      const handler = listeners.get('world');
-      expect(handler).toBeDefined();
-      handler?.({
-        userId: 'test-user',
-        actors: [],
-        scenes: [],
-        items: [],
-        journal: [],
-        messages: [],
-        combats: [],
-        users: [],
-        activeUsers: [],
-        macros: [],
-        playlists: [],
-        tables: [],
-        folders: [],
-      });
-
-      await refresh;
-
-      expect(socket.once).toHaveBeenCalledWith('world', expect.any(Function));
-      const registeredHandler = socket.once.mock.calls[0]?.[1];
-      expect(socket.off).toHaveBeenCalledWith('world', registeredHandler);
-      expect(listeners.has('world')).toBe(false);
+      expect(client.getWorldData()?.actors.map((a) => a.name)).toEqual(['Fresh']);
     });
 
-    it('removes the world listener on the timeout path', async () => {
-      // Short timeout so the test runs fast; never trigger the 'world' event.
-      client = new FoundryClient({ baseUrl: 'http://localhost:30000', timeout: 25 });
-      const { socket, listeners } = buildMockSocket();
-      (client as unknown as { socket: typeof socket }).socket = socket;
-
-      await expect(client.refreshWorldData()).rejects.toThrow('Refresh timeout');
-
-      expect(socket.once).toHaveBeenCalledWith('world', expect.any(Function));
-      const registeredHandler = socket.once.mock.calls[0]?.[1];
-      expect(socket.off).toHaveBeenCalledWith('world', registeredHandler);
-      expect(listeners.has('world')).toBe(false);
+    it('rejects when no acknowledgement arrives', async () => {
+      vi.useFakeTimers();
+      try {
+        client = new FoundryClient({ baseUrl: 'http://localhost:30000', timeout: 25 });
+        const socket = { connected: true, emit: vi.fn() };
+        (client as unknown as { socket: typeof socket }).socket = socket;
+        const refresh = expect(client.refreshWorldData()).rejects.toThrow('Refresh timeout');
+        await vi.advanceTimersByTimeAsync(30_000);
+        await refresh;
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
@@ -485,7 +463,7 @@ describe('FoundryClient', () => {
      * "✅ Connected" while serving a cache that missed every broadcast from the
      * outage is the sharper version of #217's second impact bullet.
      */
-    it('get_health_status marks the cache stale after a drop and a reconnect', async () => {
+    it('get_health_status shows a reconnect resynced the cache', async () => {
       const { handleGetHealthStatus } = await import('../../tools/handlers/diagnostics.js');
       const { client: connected, socket, fire } = await connectWithMockSocket();
       const diagnosticsClient = {
@@ -497,16 +475,22 @@ describe('FoundryClient', () => {
 
       socket.connected = false;
       fire('disconnect', 'transport close');
+      const worldRequests = () =>
+        socket.emit.mock.calls.filter(([event]) => event === 'world').length;
+      const requestsBefore = worldRequests();
       socket.connected = true;
       fire('connect');
+      await new Promise((r) => setTimeout(r, 0));
 
       const after = (await handleGetHealthStatus({}, connected, diagnosticsClient)).content[0] as {
         text: string;
       };
 
+      // The reconnect re-requests the world (answered through the ack), so the
+      // missed broadcasts no longer leave the cache stale.
+      expect(worldRequests()).toBe(requestsBefore + 1);
       expect(after.text).toContain('✅ Connected');
-      expect(after.text).toMatch(/stale/i);
-      expect(after.text).toContain('foundry_world');
+      expect(after.text).not.toMatch(/stale/i);
     });
 
     it('removes the persistent connect listener on explicit disconnect()', async () => {
