@@ -9,7 +9,6 @@ import type { DiagnosticsClient } from '../diagnostics/client.js';
 import type { FoundryClient } from '../foundry/client.js';
 import type { ComfyUIClient } from '../generate/comfyui.js';
 import type { MapJobManager } from '../generate/map-jobs.js';
-import type { DiagnosticSystem } from '../utils/diagnostics.js';
 
 /**
  * Tool execution context containing all necessary dependencies
@@ -17,7 +16,6 @@ import type { DiagnosticSystem } from '../utils/diagnostics.js';
 export interface ToolContext {
   foundryClient: FoundryClient;
   diagnosticsClient?: DiagnosticsClient;
-  diagnosticSystem?: DiagnosticSystem;
   /** Present only when COMFYUI_URL is set. */
   comfyui?: ComfyUIClient | undefined;
   maps?: MapJobManager | undefined;

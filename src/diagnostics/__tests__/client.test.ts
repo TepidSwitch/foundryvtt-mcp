@@ -46,31 +46,18 @@ describe('DiagnosticsClient', () => {
 
   it('is critical when disconnected and warning when the cache is stale', async () => {
     const down = new DiagnosticsClient(fakeFoundry({ connected: false }));
-    expect(await down.getHealthStatus()).toEqual({ status: 'critical' });
+    expect((await down.getSystemHealth()).status).toBe('critical');
     const stale = new DiagnosticsClient(
       fakeFoundry({ connected: true, stale: true, withWorld: true }),
     );
-    expect(await stale.getHealthStatus()).toEqual({ status: 'warning' });
+    expect((await stale.getSystemHealth()).status).toBe('warning');
   });
 
-  it('serves logs, searches and error diagnosis from the MCP log buffer', async () => {
+  it('serves logs and searches from the MCP log buffer', async () => {
     const client = new DiagnosticsClient(fakeFoundry({ connected: true, withWorld: true }));
-    expect((await client.getRecentLogs({ level: 'error' })).logs).toHaveLength(1);
+    const errors = await client.getRecentLogs({ level: 'error', includeStack: true });
+    expect(errors.logs).toHaveLength(1);
+    expect(errors.logs[0]?.stack).toBe('stack here');
     expect((await client.searchLogs({ pattern: 'not running' })).matches).toBe(1);
-    const diagnosis = await client.diagnoseErrors();
-    expect(diagnosis.summary.totalErrors).toBe(1);
-    expect(diagnosis.suggestions.map((s) => s.category)).toContain('connection');
-  });
-
-  it('getErrorsOnly returns entries of the requested level with stacks', async () => {
-    const client = new DiagnosticsClient(fakeFoundry({ connected: true }));
-    const errors = await client.getErrorsOnly(3600, 'error');
-    expect(errors).toHaveLength(1);
-    expect(errors[0]?.stack).toBe('stack here');
-    expect(await client.getErrorsOnly(3600, 'warn')).toHaveLength(0);
-  });
-
-  it('is always available', async () => {
-    expect(await new DiagnosticsClient(fakeFoundry({ connected: false })).isAvailable()).toBe(true);
   });
 });

@@ -1,7 +1,7 @@
 /**
  * Diagnostics computed without any Foundry server module: from the world
  * snapshot the Socket.IO login already loaded, and from this MCP server's own
- * log buffer. Backs DiagnosticsClient.
+ * log buffer. Backs DiagnosticsClient (and the diagnostics handlers).
  */
 
 import { type BufferedLog, getBufferedLogs, LOG_BUFFER_MAX } from '../utils/log-buffer.js';

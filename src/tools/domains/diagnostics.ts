@@ -4,7 +4,6 @@
 
 import { z } from 'zod';
 import type { DiagnosticsClient } from '../../diagnostics/client.js';
-import type { DiagnosticSystem } from '../../utils/diagnostics.js';
 import type { ToolContext } from '../base.js';
 import { action, DomainTool, noArgs } from '../domain.js';
 import {
@@ -22,13 +21,6 @@ function diagnostics(ctx: ToolContext): DiagnosticsClient {
     throw new Error('Diagnostics client is not available');
   }
   return ctx.diagnosticsClient;
-}
-
-function diagnosticSystem(ctx: ToolContext): DiagnosticSystem {
-  if (!ctx.diagnosticSystem) {
-    throw new Error('Diagnostic system is not available');
-  }
-  return ctx.diagnosticSystem;
 }
 
 export const diagnosticsTool = new DomainTool({
@@ -91,7 +83,7 @@ export const diagnosticsTool = new DomainTool({
       schema: z.object({
         category: z.string().optional().describe('Error category'),
       }),
-      run: (a, ctx) => handleDiagnoseErrors(a, diagnosticSystem(ctx)),
+      run: (a) => handleDiagnoseErrors(a),
     }),
   },
 });
