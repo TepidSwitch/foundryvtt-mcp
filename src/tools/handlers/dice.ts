@@ -1,8 +1,7 @@
 /**
  * @fileoverview Dice rolling tool handler
  *
- * Rolls through FoundryVTT's dice system, or the local fallback roller when
- * the API is unavailable (see `FoundryClient.rollDice`).
+ * Rolls locally with the MCP's own roller (see `FoundryClient.rollDice`).
  */
 
 import type { FoundryClient } from '../../foundry/client.js';
