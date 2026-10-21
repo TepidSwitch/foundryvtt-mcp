@@ -1764,7 +1764,12 @@ export class FoundryClient {
       diff: true,
       recursive: true,
     });
-    return result[0] as FoundryItem;
+    // A diff reply carries only the changed fields (no name or type); the
+    // cache already has the whole item with this write applied.
+    const cached = this.worldData
+      ? findCachedDocuments(this.worldData, 'Item', [itemId], `Actor.${actorId}`)[0]
+      : undefined;
+    return { ...cached, ...(result[0] as Record<string, unknown>) } as unknown as FoundryItem;
   }
 
   /**

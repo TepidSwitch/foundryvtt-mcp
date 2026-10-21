@@ -178,8 +178,8 @@ describe('update_actor_item', () => {
         f.client,
       ),
     );
-    // Not asserted: the report line shows the item name from the server reply, which
-    // for a diff update (like the fake's echo) carries no name. Flagged to the orchestrator.
+    // Live finding: a diff reply has no name or type, which printed "undefined (undefined)".
+    expect(text).toContain('**Item:** Action Surge (feat)');
     expect(text).toContain('activities');
     expect(item(f)?.system).toMatchObject({ equipped: false, ...patch });
   });
