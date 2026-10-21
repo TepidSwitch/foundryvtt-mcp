@@ -4,7 +4,10 @@ import {
   buildOptions,
   type Candidate,
   crToXp,
+  type MemberState,
   partyBudget,
+  resourceFactor,
+  summarizeParty,
   XP_BUDGET_BY_LEVEL,
 } from '../encounter.js';
 
@@ -119,5 +122,38 @@ describe('legacy and family rules', () => {
     const pool = [c('Troll', 5), c('Aberrant Cultist', 2), c('Cultist', 0.125)];
     const leader = buildOptions(pool, 3000, 6).find((o) => o.kind === 'leader');
     expect(leader?.entries.map((e) => e.candidate.name)).toEqual(['Aberrant Cultist', 'Cultist']);
+  });
+});
+
+describe('party resources', () => {
+  const m = (o: Partial<MemberState> = {}): MemberState => ({
+    name: 'x',
+    hp: 100,
+    maxHp: 100,
+    temp: 0,
+    slotsLeft: 0,
+    slotsMax: 0,
+    hdLeft: 10,
+    hdMax: 10,
+    notes: [],
+    ...o,
+  });
+  it('is 1 for a fresh party and 0.5 for a drained one', () => {
+    expect(resourceFactor(summarizeParty([m({ slotsLeft: 4, slotsMax: 4 })]))).toBe(1);
+    expect(resourceFactor(summarizeParty([m({ hp: 0, slotsMax: 4, hdLeft: 0 })]))).toBe(0.5);
+  });
+  it('drops the slot term when nobody has slots', () => {
+    const s = summarizeParty([m({ hp: 50, hdLeft: 5 }), m({ hp: 0, hdLeft: 5 })]);
+    expect(s.slots).toBeNull();
+    expect(s.hp).toBe(0.25);
+    expect(resourceFactor(s)).toBeCloseTo(0.5 + 0.5 * 0.375);
+  });
+  it('averages slots only over casters and counts 0 HP as 0', () => {
+    const s = summarizeParty([m({ slotsLeft: 2, slotsMax: 4 }), m({ hp: 0 })]);
+    expect(s.slots).toBe(0.5);
+    expect(s.hp).toBe(0.5);
+  });
+  it('is 1 when nothing is known', () => {
+    expect(resourceFactor({ hp: null, slots: null, hitDice: null })).toBe(1);
   });
 });

@@ -64,6 +64,12 @@ export const generateTool = new DomainTool({
           .boolean()
           .optional()
           .describe('Keep "(Legacy)" statblocks (default false: 2024 versions preferred)'),
+        account_for_resources: z
+          .boolean()
+          .optional()
+          .describe(
+            'Scale the XP budget down for a depleted party: x clamp(0.5 + 0.5 * mean(HP, spell slots, hit dice fractions), 0.5, 1). Default false. The Party state block is always printed.',
+          ),
         seed: z
           .number()
           .int()
