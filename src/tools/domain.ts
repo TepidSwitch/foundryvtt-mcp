@@ -175,6 +175,17 @@ export class DomainTool implements Tool {
 
     logger.debug(`Executing tool: ${this.name}.${requested}`, { args });
     const { action: _action, ...rest } = parsed.data as Record<string, unknown>;
-    return (this.actions[requested] as ActionDef).run(rest as never, context);
+    const result = await (this.actions[requested] as ActionDef).run(rest as never, context);
+
+    // Zod strips unknown keys, so a misnamed argument (timeout_seconds for
+    // timeframe_seconds) silently fell back to the default. Say so instead.
+    const ignored = Object.keys(args).filter((k) => !(k in variant.shape));
+    if (ignored.length > 0) {
+      result.content.push({
+        type: 'text',
+        text: `_Ignored unknown argument${ignored.length === 1 ? '' : 's'} ${ignored.map((k) => `\`${k}\``).join(', ')}. Fields for this action: ${describeFields((this.actions[requested] as ActionDef).schema)}._`,
+      });
+    }
+    return result;
   }
 }
