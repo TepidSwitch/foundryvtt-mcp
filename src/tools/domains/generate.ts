@@ -5,8 +5,9 @@
 import { z } from 'zod';
 import { action, DomainTool } from '../domain.js';
 import { handleGenerateEncounter } from '../handlers/encounter.js';
-import { handleGenerateLoot, handleGenerateNPC, handleLookupRule } from '../handlers/generation.js';
+import { handleGenerateLoot, handleLookupRule } from '../handlers/generation.js';
 import { handleCancelMap, handleGenerateMap, handleMapStatus } from '../handlers/map-generation.js';
+import { handleFindNpc } from '../handlers/npc-search.js';
 
 export const generateTool = new DomainTool({
   name: 'foundry_generate',
@@ -17,13 +18,19 @@ export const generateTool = new DomainTool({
   actions: {
     npc: action({
       description:
-        'Random NPC (name, race, class, HP, ability scores, background) as text. Creates no documents.',
+        'Find NPCs/monsters in the Actor compendiums (read-only search, nothing is generated or created). Filter by name, CR (cr = nearest first, or cr_min/cr_max), creature type, habitat. Results list name, CR, type, habitats, pack and Compendium uuid; bring one into the world with foundry_actors_edit import or foundry_tokens_edit place_encounter. 2024 statblocks are preferred over "(Legacy)" twins unless legacy is true.',
       schema: z.object({
-        level: z.number().min(1).max(20).optional().describe('NPC level 1-20 (default 1)'),
-        race: z.string().optional().describe('Race'),
-        class: z.string().optional().describe('Class'),
+        query: z.string().optional().describe('Name contains'),
+        cr: z.number().min(0).max(30).optional().describe('Sort by closeness to this CR'),
+        cr_min: z.number().min(0).max(30).optional().describe('Minimum CR'),
+        cr_max: z.number().min(0).max(30).optional().describe('Maximum CR'),
+        creature_type: z.string().optional().describe('e.g. undead, beast, humanoid'),
+        environment: z.string().optional().describe('Habitat from the monster data, e.g. forest'),
+        packs: z.array(z.string()).optional().describe('Actor compendium pack ids (default: all)'),
+        legacy: z.boolean().optional().describe('Keep "(Legacy)" statblocks (default false)'),
+        limit: z.number().int().min(1).max(50).optional().describe('Default 10, max 50'),
       }),
-      run: (a, ctx) => handleGenerateNPC(a, ctx.foundryClient),
+      run: (a, ctx) => handleFindNpc(a, ctx.foundryClient),
     }),
     loot: action({
       description:
@@ -53,6 +60,10 @@ export const generateTool = new DomainTool({
           .describe('Habitat from the monster data, e.g. forest, underdark, urban, any listed'),
         max_creatures: z.number().int().min(1).max(20).optional().describe('Default 6'),
         packs: z.array(z.string()).optional().describe('Actor compendium pack ids (default: all)'),
+        legacy: z
+          .boolean()
+          .optional()
+          .describe('Keep "(Legacy)" statblocks (default false: 2024 versions preferred)'),
         seed: z
           .number()
           .int()

@@ -14,6 +14,7 @@ import {
   type Candidate,
   crToXp,
   type Difficulty,
+  dropLegacyDuplicates,
   type EncounterOption,
   partyBudget,
 } from '../../dnd5e/encounter.js';
@@ -62,6 +63,7 @@ export interface GenerateEncounterArgs {
   max_creatures?: number | undefined;
   packs?: string[] | undefined;
   seed?: number | undefined;
+  legacy?: boolean | undefined;
 }
 
 function partyLevels(client: FoundryClient, refs: string[] | undefined): number[] {
@@ -79,13 +81,27 @@ function partyLevels(client: FoundryClient, refs: string[] | undefined): number[
   return levels;
 }
 
-/** Reads monster candidates (npc entries with a CR) from the given Actor packs. */
-async function loadCandidates(
+export interface NpcEntry extends Candidate {
+  creatureType: string;
+  habitats: string[];
+  packId: string;
+}
+
+/**
+ * Reads NPC entries with a valid CR from the given Actor packs (shared by
+ * encounter generation and the npc finder). First pack wins on duplicate
+ * names; "(Legacy)" twins are dropped unless `legacy` is set.
+ */
+export async function loadNpcEntries(
   client: FoundryClient,
   packIds: string[],
-  filters: { creatureType?: string | undefined; environment?: string | undefined },
-): Promise<{ candidates: Candidate[]; skipped: string[]; habitatKnown: boolean }> {
-  const byName = new Map<string, Candidate>();
+  filters: {
+    creatureType?: string | undefined;
+    environment?: string | undefined;
+    legacy?: boolean | undefined;
+  },
+): Promise<{ entries: NpcEntry[]; skipped: string[]; habitatKnown: boolean }> {
+  const byName = new Map<string, NpcEntry>();
   const skipped: string[] = [];
   let habitatKnown = false;
   for (const packId of packIds) {
@@ -114,11 +130,9 @@ async function loadCandidates(
       if (habitatTypes.length > 0) {
         habitatKnown = true;
       }
-      if (filters.creatureType) {
-        const type = str(at(doc, 'system', 'details', 'type', 'value')).toLowerCase();
-        if (type !== filters.creatureType.toLowerCase()) {
-          continue;
-        }
+      const creatureType = str(at(doc, 'system', 'details', 'type', 'value')).toLowerCase();
+      if (filters.creatureType && creatureType !== filters.creatureType.toLowerCase()) {
+        continue;
       }
       if (filters.environment && !habitatTypes.includes(filters.environment.toLowerCase())) {
         continue;
@@ -128,10 +142,32 @@ async function loadCandidates(
       if (!name || byName.has(key)) {
         continue; // first pack wins when a monster appears in several
       }
-      byName.set(key, { uuid: compendiumActorUuid(packId, str(doc._id)), name, cr, xp });
+      byName.set(key, {
+        uuid: compendiumActorUuid(packId, str(doc._id)),
+        name,
+        cr,
+        xp,
+        creatureType,
+        habitats: [...new Set(habitatTypes)],
+        packId,
+      });
     }
   }
-  return { candidates: [...byName.values()], skipped, habitatKnown };
+  return {
+    entries: dropLegacyDuplicates([...byName.values()], filters.legacy),
+    skipped,
+    habitatKnown,
+  };
+}
+
+/** Actor pack ids to search: the given ones, else every Actor pack. */
+export function actorPackIds(client: FoundryClient, packs: string[] | undefined): string[] {
+  return packs && packs.length > 0
+    ? packs
+    : client
+        .listPacks()
+        .filter((p) => p.type === 'Actor')
+        .map((p) => p.id);
 }
 
 function describeOption(o: EncounterOption, budget: number, index: number): string {
@@ -161,24 +197,23 @@ export async function handleGenerateEncounter(args: GenerateEncounterArgs, clien
     }
     const budget = partyBudget(levels, args.difficulty);
     const maxCreatures = args.max_creatures ?? 6;
-    const packIds =
-      args.packs && args.packs.length > 0
-        ? args.packs
-        : client
-            .listPacks()
-            .filter((p) => p.type === 'Actor')
-            .map((p) => p.id);
+    const packIds = actorPackIds(client, args.packs);
 
-    const { candidates, skipped, habitatKnown } = await loadCandidates(client, packIds, {
+    const {
+      entries: candidates,
+      skipped,
+      habitatKnown,
+    } = await loadNpcEntries(client, packIds, {
       creatureType: args.creature_type,
       environment: args.environment,
+      legacy: args.legacy,
     });
     // Without a seed, equal-XP ties would always go to the alphabetically first monster.
     const seed = args.seed ?? Math.floor(Math.random() * 1_000_000);
     const options = buildOptions(candidates, budget, maxCreatures, seed);
 
     const head = `🐉 **Encounter options** — ${args.difficulty} for ${levels.length} character${levels.length === 1 ? '' : 's'} (levels ${levels.join(', ')}) · budget ${budget} XP (2024 rules: monster XP is summed, no multiplier)
-Searched ${candidates.length} monster${candidates.length === 1 ? '' : 's'} in ${packIds.length} pack${packIds.length === 1 ? '' : 's'}${args.creature_type ? ` · type ${args.creature_type}` : ''}${args.environment ? ` · environment ${args.environment}` : ''} · max ${maxCreatures} creatures · seed ${seed}`;
+Searched ${candidates.length} monster${candidates.length === 1 ? '' : 's'} in ${packIds.length} pack${packIds.length === 1 ? '' : 's'}${args.creature_type ? ` · type ${args.creature_type}` : ''}${args.environment ? ` · environment ${args.environment}` : ''} · ${args.legacy ? 'legacy statblocks kept' : '2024 statblocks preferred'} · max ${maxCreatures} creatures · seed ${seed}`;
     const notes = [
       skipped.length > 0 ? `Skipped packs: ${skipped.join('; ')}` : '',
       args.environment && !habitatKnown

@@ -73,9 +73,13 @@ describe('buildOptions', () => {
   it('is deterministic and seed picks among equal-XP creatures', () => {
     const a = JSON.stringify(buildOptions(pool, 400, 6));
     expect(JSON.stringify(buildOptions(pool, 400, 6))).toBe(a);
-    const swarm0 = buildOptions(pool, 200, 6, 0).find((o) => o.kind === 'swarm');
-    const swarm1 = buildOptions(pool, 200, 6, 1).find((o) => o.kind === 'swarm');
-    expect(swarm0?.entries[0]?.candidate.name).not.toBe(swarm1?.entries[0]?.candidate.name);
+    const pick = (seed: number) =>
+      buildOptions(pool, 200, 6, seed).find((o) => o.kind === 'swarm')?.entries[0]?.candidate.name;
+    expect(pick(7)).toBe(pick(7));
+    // Live finding: a rotation by `seed % size` kept small seeds on the first
+    // names alphabetically. Small seeds must spread across the equal-XP group.
+    const picks = new Set(Array.from({ length: 20 }, (_, i) => pick(i + 1)));
+    expect(picks.size).toBeGreaterThan(1);
   });
   it('returns nothing when nothing fits', () => {
     expect(buildOptions(pool, 20, 6)).toEqual([]);
@@ -85,5 +89,35 @@ describe('buildOptions', () => {
   it('collapses duplicate options', () => {
     const only = buildOptions([c('Goblin', 0.25)], 100, 6);
     expect(only.length).toBe(1);
+  });
+});
+
+describe('legacy and family rules', () => {
+  it('drops "(Legacy)" only when a current twin exists', async () => {
+    const { dropLegacyDuplicates } = await import('../encounter.js');
+    const list = [
+      { name: 'Ogre' },
+      { name: 'Ogre (Legacy)' },
+      { name: 'Hydra (Legacy)' },
+      { name: 'Wolf' },
+    ];
+    expect(dropLegacyDuplicates(list).map((i) => i.name)).toEqual([
+      'Ogre',
+      'Hydra (Legacy)',
+      'Wolf',
+    ]);
+    expect(dropLegacyDuplicates(list, true)).toHaveLength(4);
+  });
+  it('never picks two variants of one base creature in an option', () => {
+    const pool = [c('Ogre', 2), c('Ogre (Legacy)', 2), c('Wolf', 0.25)];
+    for (const o of buildOptions(pool, 1000, 6)) {
+      const bases = o.entries.map((e) => e.candidate.name.replace(/ \(.*\)/, ''));
+      expect(new Set(bases).size).toBe(bases.length);
+    }
+  });
+  it('allows distinct statblocks that share a word', () => {
+    const pool = [c('Troll', 5), c('Aberrant Cultist', 2), c('Cultist', 0.125)];
+    const leader = buildOptions(pool, 3000, 6).find((o) => o.kind === 'leader');
+    expect(leader?.entries.map((e) => e.candidate.name)).toEqual(['Aberrant Cultist', 'Cultist']);
   });
 });
