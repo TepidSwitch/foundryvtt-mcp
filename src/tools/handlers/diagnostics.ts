@@ -11,7 +11,6 @@ import type { LogEntry } from '../../diagnostics/types.js';
 import { LogEntrySchema } from '../../diagnostics/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
 import { getConnectionStatus } from '../../foundry/connection-manager.js';
-import type { DiagnosticSystem } from '../../utils/diagnostics.js';
 import { withToolError } from './utils.js';
 
 /** Valid log levels recognized by the tool schema */
@@ -294,12 +293,7 @@ ${performanceLines.join('\n')}
 /**
  * Handles error diagnosis requests
  */
-export async function handleDiagnoseErrors(
-  args: {
-    category?: string;
-  },
-  _diagnosticSystem: DiagnosticSystem,
-) {
+export async function handleDiagnoseErrors(args: { category?: string }) {
   const { category } = args;
 
   return withToolError('diagnose errors', async () => {

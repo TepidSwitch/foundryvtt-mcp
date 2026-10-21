@@ -1,5 +1,8 @@
 # FoundryVTT MCP Troubleshooting Guide
 
+> **This fork:** the current setup and settings live in [docs/guides/fork-setup.md](docs/guides/fork-setup.md) and [docs/guides/configuration.md](docs/guides/configuration.md). Tool names below are from the original server; the fork groups them into domain tools (for example `foundry_diagnostics health`). The REST API module and `FOUNDRY_API_KEY` are no longer used.
+
+
 This guide helps you diagnose and resolve common issues with the FoundryVTT MCP server.
 
 ## Quick Diagnostics
@@ -15,8 +18,7 @@ The interactive setup wizard will detect your FoundryVTT installation and guide 
 # Test connection directly:
 npm run test-connection
 
-# Or use the MCP tool for comprehensive diagnostics (requires REST API module):
-# In your AI client, run: get_health_status
+# Or ask your AI client to run foundry_diagnostics with action health
 ```
 
 ### Check Current Status
@@ -124,13 +126,10 @@ The server provides detailed diagnostics on startup. Look for:
 2. **FoundryVTT version**: Ensure FoundryVTT version 11+ for best compatibility
 
 #### Diagnostics Tools Not Working
-**Symptoms**: Health monitoring and log tools fail
+**Symptoms**: `foundry_diagnostics` reports no data
 **Solutions**:
-1. **REST API module required**: These 5 tools require the optional Foundry Local REST API module
-2. **Install module**: Download from FoundryVTT's module browser
-3. **Enable module**: Activate it in your world's module settings
-4. **Set API key**: Add `FOUNDRY_API_KEY` to your `.env` file
-5. **Update module**: Ensure you have the latest version (v0.8.1+)
+1. **Check the connection**: run `foundry_diagnostics health`; it needs a logged-in session and loaded world data
+2. **Refresh the world**: `foundry_world refresh` reloads the snapshot
 
 ## Environment Configuration
 
@@ -143,9 +142,6 @@ FOUNDRY_PASSWORD=your_password
 
 # Optional: Direct user ID bypass
 # FOUNDRY_USER_ID=abc123def456ghij
-
-# Optional: Diagnostics (requires REST API module)
-# FOUNDRY_API_KEY=your_api_key_here
 
 # Optional Settings
 FOUNDRY_TIMEOUT=10000
@@ -182,15 +178,6 @@ Test individual components:
    curl -s http://localhost:30000/join | head -20
    ```
 
-3. **REST API status** (if module installed):
-   ```bash
-   curl http://localhost:30000/api/status
-   ```
-
-4. **Authenticated REST endpoint** (if module installed):
-   ```bash
-   curl -H "x-api-key: YOUR_API_KEY" http://localhost:30000/api/world
-   ```
 
 ### Test Individual Features
 Use the MCP tools to test specific functionality:
@@ -199,7 +186,7 @@ Use the MCP tools to test specific functionality:
 - `get_combat_state` - Test combat tracking
 - `get_users` - Test user awareness
 - `search_world` - Test world-wide search
-- `get_health_status` - Comprehensive diagnostics (requires REST API module)
+- `get_health_status` - Comprehensive diagnostics (`foundry_diagnostics health` in this fork)
 
 ## Platform-Specific Issues
 

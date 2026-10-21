@@ -1,51 +1,74 @@
 # Configuration Guide
 
-## Environment Variables
+All configuration is environment variables, validated in `src/config/index.ts`.
+For the fork-specific walkthrough (credentials, Claude Desktop config, dedicated
+user, toolset table, ComfyUI setup) see [fork-setup.md](fork-setup.md); this page
+is the variable reference.
 
-Copy `.env.example` and set the required values:
+## Where variables come from
 
-```bash
-cp .env.example .env
-```
+1. The process environment (for Claude Desktop, the `env` block of its config).
+2. A secrets file, loaded without overriding anything already set:
+   - Linux/macOS: `~/.config/foundryvtt-mcp/.env` (or `$XDG_CONFIG_HOME/foundryvtt-mcp/.env`)
+   - Windows: `%APPDATA%\foundryvtt-mcp\.env`
+   - or any path via `FOUNDRY_ENV_FILE`.
+3. For local development, a project `.env` (`cp .env.example .env`).
 
-### Required
-
-| Variable | Description |
-|----------|-------------|
-| `FOUNDRY_URL` | FoundryVTT server URL (e.g. `http://localhost:30000`) |
-| `FOUNDRY_USERNAME` | FoundryVTT user account |
-| `FOUNDRY_PASSWORD` | FoundryVTT user password |
-
-### Optional
+## Connection
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `FOUNDRY_USER_ID` | — | 16-char document `_id` (bypasses username resolution) |
-| `LOG_LEVEL` | `info` | Logging verbosity (`debug`, `info`, `warn`, `error`) |
-| `NODE_ENV` | `development` | Environment mode |
+| `FOUNDRY_URL` | required | FoundryVTT URL including protocol, e.g. `http://localhost:30000` |
+| `FOUNDRY_USERNAME` | unset | Foundry user (display name, case-sensitive) |
+| `FOUNDRY_PASSWORD` | unset | Foundry user password |
+| `FOUNDRY_USER_ID` | unset | 16-char user `_id`; skips username resolution |
+| `FOUNDRY_SOCKET_PATH` | `/socket.io/` | Socket.IO path |
 | `FOUNDRY_TIMEOUT` | `10000` | Request timeout in ms |
-| `FOUNDRY_RETRY_ATTEMPTS` | `3` | Retry failed requests |
+| `FOUNDRY_RETRY_ATTEMPTS` | `3` | Retry attempts for failed requests |
 | `FOUNDRY_RETRY_DELAY` | `1000` | Delay between retries in ms |
+| `FOUNDRY_ENV_FILE` | auto | Explicit secrets file path |
+
+## Writes, safety and tools
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FOUNDRY_WRITE_ENABLED` | `false` | Expose and allow the `_edit` write tools |
+| `FOUNDRY_DRY_RUN` | `false` | Log writes without sending them; output carries a DRY RUN banner |
+| `FOUNDRY_AUDIT_FILE` | `~/.local/state/foundryvtt-mcp/writes.jsonl` (`%APPDATA%\foundryvtt-mcp\writes.jsonl` on Windows) | JSONL write log used by `foundry_history`; `off` keeps it in memory only |
+| `FOUNDRY_TOOLSETS` | all except `canvas` and `script` | Comma-separated toolsets. Setting it replaces the default list. Valid names are the `TOOLSETS` array in `src/tools/base.ts` (`actors`, `items`, `effects`, `scenes`, `tokens`, `combat`, `journals`, `compendium`, `audio`, `chat`, `world`, `tables`, `files`, `generate`, `history`, `diagnostics`, `canvas`, `script`); unknown names are ignored with a warning |
+
+## ComfyUI (optional map generation)
+
+Unset `COMFYUI_URL` means the map tool is not offered. Setup is in
+[fork-setup.md](fork-setup.md#ai-map-generation-optional).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `COMFYUI_URL` | unset | ComfyUI base URL, e.g. `http://192.168.1.50:8188` |
+| `COMFYUI_CHECKPOINT` | `dDBattlemapsSDXL10_upscaleV10.safetensors` | SDXL checkpoint file name |
+| `COMFYUI_VAE` | `sdxl_vae.safetensors` | VAE file name |
+| `COMFYUI_API_KEY` | unset | Key for a hosted/proxied ComfyUI (`Authorization: Bearer <key>`); never logged |
+| `COMFYUI_AUTH_HEADER` | `Authorization` | Header carrying the key; other headers get the raw key |
+| `COMFYUI_SCENE_FOLDER` | `Generated Maps` | Scene folder for generated maps |
+
+## Server and cache
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_SERVER_NAME` | `foundryvtt-mcp` | Server name reported to clients |
+| `MCP_SERVER_VERSION` | `0.1.0` | Server version reported to clients |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `NODE_ENV` | `development` | `development`, `production`, `test` |
 | `CACHE_ENABLED` | `true` | Enable response caching |
 | `CACHE_TTL_SECONDS` | `300` | Cache duration in seconds |
-| `CACHE_MAX_SIZE` | — | Maximum cache entries |
-
-## Server Settings
-
-```env
-# Logging
-LOG_LEVEL=info  # debug, info, warn, error
-
-# Performance
-FOUNDRY_TIMEOUT=10000      # Request timeout (ms)
-FOUNDRY_RETRY_ATTEMPTS=3   # Retry failed requests
-```
+| `CACHE_MAX_SIZE` | `1000` | Maximum cache entries |
 
 ## Security
 
-- Limit FoundryVTT user permissions to the minimum required
+- Give the MCP its own Foundry user with the lowest role that works (see "Dedicated MCP Foundry user" in [fork-setup.md](fork-setup.md))
+- Keep the password in the secrets file, not the Claude Desktop config
+- Leave `FOUNDRY_WRITE_ENABLED` off unless you want the write tools
 - Run the server on an internal network only
-- Monitor logs for suspicious activity
 
 ## FoundryVTT Authentication
 
@@ -76,4 +99,4 @@ Your FoundryVTT user needs:
 
 ### Diagnostics
 
-The diagnostics tools (`foundry_diagnostics`) need no Foundry module: health comes from the world snapshot and the log tools read this server's own log. The old REST bridge and `FOUNDRY_API_KEY` were removed; a leftover `FOUNDRY_API_KEY` is ignored with a startup warning.
+`foundry_diagnostics` (actions `health`, `system`, `search_logs`, `logs`, `diagnose`) needs no Foundry module: health comes from the world snapshot and the log actions read this server's own log buffer. The `diagnose` action is a fixed stub. The old REST bridge and `FOUNDRY_API_KEY` were removed; a leftover `FOUNDRY_API_KEY` is ignored with a startup warning. See [fork-setup.md](fork-setup.md#diagnostics).

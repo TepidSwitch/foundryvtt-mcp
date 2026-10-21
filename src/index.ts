@@ -45,7 +45,6 @@ import {
   routeResourceRequest,
   type ToolRegistry,
 } from './tools/index.js';
-import { DiagnosticSystem } from './utils/diagnostics.js';
 import { logger } from './utils/logger.js';
 
 /**
@@ -57,7 +56,6 @@ class FoundryMCPServer {
   private foundryClient: FoundryClient;
   private connection: ConnectionManager;
   private diagnosticsClient: DiagnosticsClient;
-  private diagnosticSystem: DiagnosticSystem;
   private registry: ToolRegistry;
   private comfyui?: ComfyUIClient;
   private maps?: MapJobManager;
@@ -115,9 +113,6 @@ class FoundryMCPServer {
 
     // Initialize DiagnosticsClient
     this.diagnosticsClient = new DiagnosticsClient(this.foundryClient);
-
-    // Initialize DiagnosticSystem
-    this.diagnosticSystem = new DiagnosticSystem(this.foundryClient);
 
     // Optional AI map generation: only when a ComfyUI server is configured.
     if (config.comfyui.url) {
@@ -183,7 +178,6 @@ class FoundryMCPServer {
         const context: ToolContext = {
           foundryClient: this.foundryClient,
           diagnosticsClient: this.diagnosticsClient,
-          diagnosticSystem: this.diagnosticSystem,
           comfyui: this.comfyui,
           maps: this.maps,
           sceneFolder: config.comfyui.sceneFolder,
