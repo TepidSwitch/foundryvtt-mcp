@@ -378,7 +378,11 @@ export async function handleGetSceneInfo(
       content: [
         {
           type: 'text',
-          text: `🗺️ **${scene.name}** \`${scene._id}\`
+          text: `🗺️ **${scene.name}** \`${scene._id}\`${
+            ref
+              ? ''
+              : '\n_No sceneId or name was given, so this is the active scene. Pass sceneId for another one (see foundry_scenes search)._'
+          }
 **Folder:** ${f.path || 'none'} · **Active:** ${scene.active ? 'Yes' : 'No'} · **In navigation bar:** ${scene.navigation ? 'Yes' : 'No'}
 **Size:** ${f.cols}×${f.rows} squares (${scene.width}×${scene.height}px, ${f.gridSize}px grid, ${num(at(scene, 'grid', 'distance'), 5)} ${str(at(scene, 'grid', 'units'), 'ft')}/square)
 **Lighting:** darkness ${Math.round(darkness * 100)}%, global light ${globalLight ? 'on' : 'off'}${weather ? `, weather: ${weather}` : ''}
