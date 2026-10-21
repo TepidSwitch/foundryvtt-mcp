@@ -275,6 +275,23 @@ describe('scene tools', () => {
     expect(out).toMatch(/Cultist `\w*` \(hostile\)/);
     expect(out).toContain('Dako / Temples');
     expect(out).toContain('Readiness');
+    expect(out).not.toContain('this is the active scene');
+  });
+
+  it('says when it fell back to the active scene', async () => {
+    // Live finding: a call without sceneId (e.g. a misnamed `scene` argument)
+    // silently described whichever scene was active.
+    const world = {
+      ...snapshot,
+      scenes: [scene({ _id: 'scActive00000001', name: 'Live Map', active: true })],
+    };
+    const c = {
+      getWorldSnapshot: () => world,
+      getScenes: () => world.scenes,
+    } as unknown as FoundryClient;
+    const out = text(await handleGetSceneInfo({}, c));
+    expect(out).toContain('Live Map');
+    expect(out).toContain('this is the active scene');
   });
 
   it('reports token positions as map squares with the scene padding removed', async () => {
