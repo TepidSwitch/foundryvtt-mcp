@@ -1,7 +1,7 @@
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
-import { describe, expect, it, vi } from 'vitest';
-import { FoundryClient } from '../../../foundry/client.js';
+import { describe, expect, it } from 'vitest';
 import type { WorldCombat } from '../../../foundry/types.js';
+import { fakeFoundry } from '../../../test-utils/fake-foundry.js';
 import { handleGetCombatState } from '../combat.js';
 import {
   computeNextTurn,
@@ -25,6 +25,41 @@ const makeCombat = (overrides: Partial<WorldCombat> = {}): WorldCombat => ({
   combatants: [
     { _id: COMBATANT_ID, name: 'Alice', initiative: 15, hidden: false, defeated: false },
     { _id: 'eeeeeeeeeeeeeeee', name: 'Bob', initiative: 10, hidden: false, defeated: false },
+  ],
+  ...overrides,
+});
+
+const ALICE = 'alicealicealice1';
+const BOB = 'bobbobbobbobbobb';
+const CHARLIE = 'charliecharlie11';
+
+type Fake = ReturnType<typeof fakeFoundry>;
+type Row = Record<string, unknown>;
+
+const setup = (world: { combats?: WorldCombat[]; scenes?: Row[] } = {}, config: Row = {}): Fake =>
+  fakeFoundry({ world, config });
+const serverCombat = (f: Fake, id = COMBAT_ID) => f.world.combats?.find((c) => c._id === id);
+const combatant = (f: Fake, id: string, combatId = COMBAT_ID) =>
+  (serverCombat(f, combatId)?.combatants as Row[]).find((c) => c._id === id);
+const writes = (f: Fake) => f.sent.filter((s) => s.action !== 'get');
+const textOf = (r: { content: Array<{ text?: string }> }) => r.content[0]?.text ?? '';
+
+/**
+ * Stored (creation) order deliberately differs from initiative order:
+ *   stored:   Bob (5), Alice (18), Charlie (12)
+ *   initiative order: Alice (18), Charlie (12), Bob (5)
+ * Shaped the way Foundry persists a Combat: no `started` field (it is a
+ * client-side getter, so a fixture that invents it hides a dead re-anchor).
+ */
+const makeUnsortedCombat = (overrides: Partial<WorldCombat> = {}): WorldCombat => ({
+  _id: COMBAT_ID,
+  active: true,
+  round: 1,
+  turn: 0,
+  combatants: [
+    { _id: BOB, name: 'Bob', initiative: 5, hidden: false, defeated: false },
+    { _id: ALICE, name: 'Alice', initiative: 18, hidden: false, defeated: false },
+    { _id: CHARLIE, name: 'Charlie', initiative: 12, hidden: false, defeated: false },
   ],
   ...overrides,
 });
@@ -117,431 +152,238 @@ describe('computeNextTurn', () => {
   });
 });
 
-describe('Combat mutation handlers', () => {
-  const createMockClient = (opts: {
-    combat?: WorldCombat | null;
-    scenes?: Array<Record<string, unknown>>;
-    updateCombat?: (id: string, patch: { turn?: number; round?: number }) => unknown;
-    endCombat?: (id: string) => unknown;
-    setInitiative?: (combatId: string, combatantId: string, initiative: number) => unknown;
-    startCombat?: (
-      sceneId: string,
-      combatants: Array<{ tokenId: string; sceneId: string; actorId?: string }>,
-    ) => unknown;
-  }): FoundryClient =>
-    ({
-      getCombatState: vi.fn(() => opts.combat ?? null),
-      getScenes: vi.fn(() => opts.scenes ?? []),
-      updateCombat: vi.fn(opts.updateCombat ?? (() => ({}))),
-      endCombat: vi.fn(opts.endCombat ?? (() => undefined)),
-      setCombatantInitiative: vi.fn(opts.setInitiative ?? (() => ({}))),
-      startCombat: vi.fn(
-        opts.startCombat ??
-          ((_sceneId: string, combatants: Array<unknown>) => ({
-            combatId: COMBAT_ID,
-            combatantCount: combatants.length,
-          })),
-      ),
-    }) as unknown as FoundryClient;
-
-  describe('handleNextTurn', () => {
-    it('advances the active combat and reports the new round/turn/combatant', async () => {
-      const client = createMockClient({ combat: makeCombat({ turn: 0, round: 1 }) });
-      const result = await handleNextTurn({}, client);
-
-      const text = result.content[0].text;
-      expect(result.content[0].type).toBe('text');
-      expect(text).toContain('Combat Turn Advanced');
-      expect(text).toContain('**Round:** 1');
-      expect(text).toContain('Bob');
-      expect(client.updateCombat).toHaveBeenCalledWith(COMBAT_ID, { turn: 1, round: 1 });
-    });
-
-    it('raises McpError when there is no active combat', async () => {
-      const client = createMockClient({ combat: null });
-      await expect(handleNextTurn({}, client)).rejects.toThrow(McpError);
-      expect(client.updateCombat).not.toHaveBeenCalled();
-    });
-
-    it('propagates the write-disabled guard error', async () => {
-      const client = createMockClient({
-        combat: makeCombat(),
-        updateCombat: () => {
-          throw new Error(
-            'Write operations are disabled. Set FOUNDRY_WRITE_ENABLED=true to allow game-state mutation.',
-          );
-        },
-      });
-      await expect(handleNextTurn({}, client)).rejects.toThrow(/FOUNDRY_WRITE_ENABLED/);
-    });
-
-    it('skips a defeated combatant when skipDefeated arg is true', async () => {
-      const combat = makeCombat({
-        turn: 0,
-        round: 1,
-        combatants: [
-          { _id: COMBATANT_ID, name: 'Alice', initiative: 15, hidden: false, defeated: false },
-          { _id: 'eeeeeeeeeeeeeeee', name: 'Bob', initiative: 10, hidden: false, defeated: true },
-          { _id: 'ffffffffffffffff', name: 'Cara', initiative: 5, hidden: false, defeated: false },
-        ],
-      });
-      const client = createMockClient({ combat });
-      await handleNextTurn({ skipDefeated: true }, client);
-      // Bob (index 1) is defeated, so the turn advances to Cara (index 2).
-      expect(client.updateCombat).toHaveBeenCalledWith(COMBAT_ID, { turn: 2, round: 1 });
-    });
-
-    it('falls back to the combat skipDefeated setting when no arg is given', async () => {
-      const combat = makeCombat({
-        turn: 0,
-        round: 1,
-        settings: { skipDefeated: true },
-        combatants: [
-          { _id: COMBATANT_ID, name: 'Alice', initiative: 15, hidden: false, defeated: false },
-          { _id: 'eeeeeeeeeeeeeeee', name: 'Bob', initiative: 10, hidden: false, defeated: true },
-          { _id: 'ffffffffffffffff', name: 'Cara', initiative: 5, hidden: false, defeated: false },
-        ],
-      });
-      const client = createMockClient({ combat });
-      await handleNextTurn({}, client);
-      expect(client.updateCombat).toHaveBeenCalledWith(COMBAT_ID, { turn: 2, round: 1 });
-    });
+describe('next_turn', () => {
+  it('advances the active combat and reports the new round/turn/combatant', async () => {
+    const f = setup({ combats: [makeCombat({ turn: 0, round: 1 })] });
+    const text = textOf(await handleNextTurn({}, f.client));
+    expect(text).toContain('Combat Turn Advanced');
+    expect(text).toContain('**Round:** 1');
+    expect(text).toContain('Bob');
+    expect(serverCombat(f)).toMatchObject({ turn: 1, round: 1 });
   });
 
-  describe('handleStartCombat', () => {
-    const SCENE_ID = 'ssssssssssssssss'.slice(0, 16);
-    const TOKEN_A = 'tokenaaaaaaaaaaa';
-    const TOKEN_B = 'tokenbbbbbbbbbbb';
-    const makeScene = (active: boolean, tokens: Array<Record<string, unknown>>) => ({
-      _id: SCENE_ID,
-      name: 'Battlefield',
-      active,
-      tokens,
-    });
-
-    it('seeds combatants from explicit tokenIds, resolving actorId from the token', async () => {
-      const startCombat = vi.fn(() => ({ combatId: COMBAT_ID, combatantCount: 1 }));
-      const client = createMockClient({
-        scenes: [makeScene(true, [{ _id: TOKEN_A, actorId: 'actoraaaaaaaaaaa' }])],
-        startCombat,
-      });
-      const result = await handleStartCombat({ tokenIds: [TOKEN_A] }, client);
-
-      expect(result.content[0].text).toContain('Combat Started');
-      expect(startCombat).toHaveBeenCalledWith(SCENE_ID, [
-        { tokenId: TOKEN_A, sceneId: SCENE_ID, actorId: 'actoraaaaaaaaaaa' },
-      ]);
-    });
-
-    it('defaults to every token on the active scene when tokenIds is omitted', async () => {
-      const startCombat = vi.fn(() => ({ combatId: COMBAT_ID, combatantCount: 2 }));
-      const client = createMockClient({
-        scenes: [
-          makeScene(true, [{ _id: TOKEN_A, actorId: 'actoraaaaaaaaaaa' }, { _id: TOKEN_B }]),
-        ],
-        startCombat,
-      });
-      await handleStartCombat({}, client);
-
-      expect(startCombat).toHaveBeenCalledWith(SCENE_ID, [
-        { tokenId: TOKEN_A, sceneId: SCENE_ID, actorId: 'actoraaaaaaaaaaa' },
-        { tokenId: TOKEN_B, sceneId: SCENE_ID, actorId: undefined },
-      ]);
-    });
-
-    it('honours an explicit sceneId', async () => {
-      const startCombat = vi.fn(() => ({ combatId: COMBAT_ID, combatantCount: 0 }));
-      const client = createMockClient({
-        scenes: [makeScene(false, []), { _id: 'othersssssssssss', name: 'Other', active: true }],
-        startCombat,
-      });
-      await handleStartCombat({ sceneId: SCENE_ID }, client);
-      expect(startCombat).toHaveBeenCalledWith(SCENE_ID, []);
-    });
-
-    it('raises McpError when no scene can be resolved', async () => {
-      const client = createMockClient({ scenes: [] });
-      await expect(handleStartCombat({}, client)).rejects.toThrow(McpError);
-      expect(client.startCombat).not.toHaveBeenCalled();
-    });
-
-    it('raises McpError when a requested token is not on the scene', async () => {
-      const client = createMockClient({ scenes: [makeScene(true, [{ _id: TOKEN_A }])] });
-      await expect(handleStartCombat({ tokenIds: [TOKEN_B] }, client)).rejects.toThrow(McpError);
-      expect(client.startCombat).not.toHaveBeenCalled();
-    });
+  it('wraps into the next round', async () => {
+    const f = setup({ combats: [makeCombat({ turn: 1, round: 1 })] });
+    await handleNextTurn({}, f.client);
+    expect(serverCombat(f)).toMatchObject({ turn: 0, round: 2 });
   });
 
-  describe('handleEndCombat', () => {
-    it('ends the active combat and reports the encounter id', async () => {
-      const client = createMockClient({ combat: makeCombat() });
-      const result = await handleEndCombat({}, client);
-
-      expect(result.content[0].text).toContain('Combat Ended');
-      expect(result.content[0].text).toContain(COMBAT_ID);
-      expect(client.endCombat).toHaveBeenCalledWith(COMBAT_ID);
-    });
-
-    it('raises McpError when there is no active combat', async () => {
-      const client = createMockClient({ combat: null });
-      await expect(handleEndCombat({}, client)).rejects.toThrow(McpError);
-      expect(client.endCombat).not.toHaveBeenCalled();
-    });
+  it('raises McpError when there is no active combat', async () => {
+    const f = setup();
+    await expect(handleNextTurn({}, f.client)).rejects.toThrow(McpError);
+    expect(writes(f)).toEqual([]);
   });
 
-  describe('handleSetInitiative', () => {
-    it('sets initiative on the active combat by default', async () => {
-      const client = createMockClient({ combat: makeCombat() });
-      const result = await handleSetInitiative(
-        { combatantId: COMBATANT_ID, initiative: 18 },
-        client,
-      );
+  it('propagates the write-disabled guard error', async () => {
+    const f = setup({ combats: [makeCombat()] }, { writeEnabled: false });
+    await expect(handleNextTurn({}, f.client)).rejects.toThrow(/FOUNDRY_WRITE_ENABLED/);
+    expect(serverCombat(f)?.turn).toBe(0);
+  });
 
-      expect(result.content[0].text).toContain('Initiative Set');
-      expect(result.content[0].text).toContain('18');
-      expect(client.setCombatantInitiative).toHaveBeenCalledWith(COMBAT_ID, COMBATANT_ID, 18);
+  const threeWithBobDefeated = (overrides: Partial<WorldCombat> = {}) =>
+    makeCombat({
+      turn: 0,
+      round: 1,
+      combatants: [
+        { _id: COMBATANT_ID, name: 'Alice', initiative: 15, hidden: false, defeated: false },
+        { _id: 'eeeeeeeeeeeeeeee', name: 'Bob', initiative: 10, hidden: false, defeated: true },
+        { _id: 'ffffffffffffffff', name: 'Cara', initiative: 5, hidden: false, defeated: false },
+      ],
+      ...overrides,
     });
 
-    it('honours an explicit combatId', async () => {
-      const client = createMockClient({ combat: null });
-      await handleSetInitiative(
-        { combatantId: COMBATANT_ID, initiative: 5, combatId: COMBAT_ID },
-        client,
-      );
-      expect(client.setCombatantInitiative).toHaveBeenCalledWith(COMBAT_ID, COMBATANT_ID, 5);
-    });
+  it('skips a defeated combatant when skipDefeated arg is true', async () => {
+    const f = setup({ combats: [threeWithBobDefeated()] });
+    await handleNextTurn({ skipDefeated: true }, f.client);
+    // Bob (index 1) is defeated, so the turn advances to Cara (index 2).
+    expect(serverCombat(f)).toMatchObject({ turn: 2, round: 1 });
+  });
 
-    it('rejects a missing combatantId before reaching the client', async () => {
-      const client = createMockClient({ combat: makeCombat() });
-      await expect(handleSetInitiative({ combatantId: '', initiative: 5 }, client)).rejects.toThrow(
-        McpError,
-      );
-      expect(client.setCombatantInitiative).not.toHaveBeenCalled();
-    });
+  it('falls back to the combat skipDefeated setting when no arg is given', async () => {
+    const f = setup({ combats: [threeWithBobDefeated({ settings: { skipDefeated: true } })] });
+    await handleNextTurn({}, f.client);
+    expect(serverCombat(f)).toMatchObject({ turn: 2, round: 1 });
+  });
 
-    it('rejects a non-finite initiative before reaching the client', async () => {
-      const client = createMockClient({ combat: makeCombat() });
-      await expect(
-        handleSetInitiative({ combatantId: COMBATANT_ID, initiative: Number.NaN }, client),
-      ).rejects.toThrow(McpError);
-      expect(client.setCombatantInitiative).not.toHaveBeenCalled();
-    });
-
-    it('raises McpError when no active combat and no combatId', async () => {
-      const client = createMockClient({ combat: null });
-      await expect(
-        handleSetInitiative({ combatantId: COMBATANT_ID, initiative: 5 }, client),
-      ).rejects.toThrow(McpError);
-      expect(client.setCombatantInitiative).not.toHaveBeenCalled();
-    });
+  it('names the same combatant get_combat_state marks as CURRENT (initiative order)', async () => {
+    const f = setup({ combats: [makeUnsortedCombat({ turn: 0 })] });
+    const text = textOf(await handleNextTurn({}, f.client));
+    // Alice (18) -> Charlie (12), NOT whoever is at stored index 1.
+    expect(text).toContain('**Now acting:** Charlie');
+    expect(serverCombat(f)).toMatchObject({ turn: 1, round: 1 });
+    // The client's cache received its own write; the read tool must agree.
+    const state = textOf(await handleGetCombatState({}, f.client));
+    const line = state.split('\n').find((l) => l.includes('<-- CURRENT')) ?? '';
+    expect(/\*\*(.+?)\*\*/.exec(line)?.[1]).toBe('Charlie');
   });
 });
 
-// --------------------------------------------------------------------------
-// Client-level: exercise the real methods with a mock socket, asserting the
-// emitted modifyDocument body (mirrors actor-mutations.test.ts).
-// --------------------------------------------------------------------------
-describe('FoundryClient combat mutations', () => {
-  type SocketEmitMock = (event: string, payload: unknown, cb: (response: unknown) => void) => void;
-
-  const buildClient = (opts: { writeEnabled?: boolean; connected?: boolean }) => {
-    const client = new FoundryClient({
-      baseUrl: 'http://localhost:30000',
-      writeEnabled: opts.writeEnabled ?? true,
-    });
-    const emit = vi.fn(((_event, payload, cb) => {
-      const op = (
-        payload as {
-          operation?: {
-            updates?: Array<Record<string, unknown>>;
-            data?: Array<Record<string, unknown>>;
-          };
-        }
-      ).operation;
-      if (op?.updates) {
-        cb({ result: [op.updates[0]] });
-      } else if (op?.data) {
-        // Echo created docs, stamping a Combat id so startCombat can chain.
-        cb({ result: op.data.map((d) => ({ _id: COMBAT_ID, ...d })) });
-      } else {
-        cb({ result: [] });
-      }
-    }) as SocketEmitMock);
-    if (opts.connected !== false) {
-      (client as unknown as { socket: { connected: boolean; emit: SocketEmitMock } }).socket = {
-        connected: true,
-        emit,
-      };
-    }
-    return { client, emit };
-  };
-
-  it('updateCombat emits a Combat update with turn/round and no parentUuid', async () => {
-    const { client, emit } = buildClient({});
-    await client.updateCombat(COMBAT_ID, { turn: 2, round: 3 });
-    const [event, body] = emit.mock.calls[0] as unknown[] as [string, Record<string, unknown>];
-    expect(event).toBe('modifyDocument');
-    expect(body).toMatchObject({
-      type: 'Combat',
-      action: 'update',
-      operation: { updates: [{ _id: COMBAT_ID, turn: 2, round: 3 }] },
-    });
-    expect((body.operation as Record<string, unknown>).parentUuid).toBeUndefined();
+describe('start_combat', () => {
+  const SCENE_ID = 'ssssssssssssssss';
+  const TOKEN_A = 'tokenaaaaaaaaaaa';
+  const TOKEN_B = 'tokenbbbbbbbbbbb';
+  const makeScene = (active: boolean, tokens: Row[]) => ({
+    _id: SCENE_ID,
+    name: 'Battlefield',
+    active,
+    tokens,
   });
 
-  it('endCombat emits a Combat delete carrying ids', async () => {
-    const { client, emit } = buildClient({});
-    await client.endCombat(COMBAT_ID);
-    const [, body] = emit.mock.calls[0] as unknown[] as [string, Record<string, unknown>];
-    expect(body).toMatchObject({
-      type: 'Combat',
-      action: 'delete',
-      operation: { ids: [COMBAT_ID] },
+  it('seeds combatants from explicit tokenIds, resolving actorId from the token', async () => {
+    const f = setup({
+      scenes: [makeScene(true, [{ _id: TOKEN_A, actorId: 'actoraaaaaaaaaaa' }, { _id: TOKEN_B }])],
     });
-  });
-
-  it('setCombatantInitiative emits a Combatant update with parentUuid Combat.<id>', async () => {
-    const { client, emit } = buildClient({});
-    await client.setCombatantInitiative(COMBAT_ID, COMBATANT_ID, 12);
-    const [, body] = emit.mock.calls[0] as unknown[] as [string, Record<string, unknown>];
-    expect(body).toMatchObject({
-      type: 'Combatant',
-      action: 'update',
-      operation: {
-        updates: [{ _id: COMBATANT_ID, initiative: 12 }],
-        parentUuid: `Combat.${COMBAT_ID}`,
-      },
-    });
-  });
-
-  it('startCombat creates a Combat then embedded Combatants with parentUuid', async () => {
-    const SCENE_ID = 'sceneididididid1';
-    const TOKEN_ID = 'tokenididididid1';
-    const { client, emit } = buildClient({});
-    const result = await client.startCombat(SCENE_ID, [
-      { tokenId: TOKEN_ID, sceneId: SCENE_ID, actorId: 'actorididididid1' },
+    const text = textOf(await handleStartCombat({ tokenIds: [TOKEN_A] }, f.client));
+    expect(text).toContain('Combat Started');
+    expect(f.world.combats).toHaveLength(1);
+    const created = f.world.combats?.[0] as Row;
+    expect(created).toMatchObject({ scene: SCENE_ID, active: true });
+    expect(created.combatants).toMatchObject([
+      { tokenId: TOKEN_A, sceneId: SCENE_ID, actorId: 'actoraaaaaaaaaaa' },
     ]);
+  });
 
-    expect(result).toEqual({ combatId: COMBAT_ID, combatantCount: 1 });
-    expect(emit).toHaveBeenCalledTimes(2);
-
-    const [, combatBody] = emit.mock.calls[0] as unknown[] as [string, Record<string, unknown>];
-    expect(combatBody).toMatchObject({
-      type: 'Combat',
-      action: 'create',
-      operation: { data: [{ scene: SCENE_ID, active: true }] },
+  it('defaults to every token on the active scene when tokenIds is omitted', async () => {
+    const f = setup({
+      scenes: [makeScene(true, [{ _id: TOKEN_A, actorId: 'actoraaaaaaaaaaa' }, { _id: TOKEN_B }])],
     });
-    expect((combatBody.operation as Record<string, unknown>).parentUuid).toBeUndefined();
+    await handleStartCombat({}, f.client);
+    const combatants = (f.world.combats?.[0] as Row).combatants as Row[];
+    expect(combatants.map((c) => c.tokenId)).toEqual([TOKEN_A, TOKEN_B]);
+    expect(combatants[0]?.actorId).toBe('actoraaaaaaaaaaa');
+  });
 
-    const [, combatantBody] = emit.mock.calls[1] as unknown[] as [string, Record<string, unknown>];
-    expect(combatantBody).toMatchObject({
-      type: 'Combatant',
-      action: 'create',
-      operation: {
-        data: [{ tokenId: TOKEN_ID, sceneId: SCENE_ID, actorId: 'actorididididid1' }],
-        parentUuid: `Combat.${COMBAT_ID}`,
-      },
+  it('honours an explicit sceneId and creates an empty combat for an empty scene', async () => {
+    const f = setup({
+      scenes: [makeScene(false, []), { _id: 'othersssssssssss', name: 'Other', active: true }],
     });
+    await handleStartCombat({ sceneId: SCENE_ID }, f.client);
+    expect(f.world.combats?.[0]).toMatchObject({ scene: SCENE_ID });
+    expect((f.world.combats?.[0] as Row).combatants ?? []).toEqual([]);
   });
 
-  it('startCombat skips the Combatant create when there are no combatants', async () => {
-    const SCENE_ID = 'sceneididididid1';
-    const { client, emit } = buildClient({});
-    const result = await client.startCombat(SCENE_ID, []);
-    expect(result).toEqual({ combatId: COMBAT_ID, combatantCount: 0 });
-    expect(emit).toHaveBeenCalledTimes(1);
+  it('deactivates the combat that was active (live-found server side effect)', async () => {
+    const f = setup({
+      combats: [makeCombat()],
+      scenes: [makeScene(true, [{ _id: TOKEN_A }])],
+    });
+    await handleStartCombat({}, f.client);
+    expect(f.world.combats?.map((c) => c.active)).toEqual([false, true]);
+    expect(f.client.getCombatState()?._id).toBe(f.world.combats?.[1]?._id);
   });
 
-  it('startCombat rejects a malformed scene id', async () => {
-    const { client } = buildClient({});
-    await expect(client.startCombat('short', [])).rejects.toThrow(/Invalid sceneId/);
+  it('raises McpError when no scene can be resolved', async () => {
+    const f = setup();
+    await expect(handleStartCombat({}, f.client)).rejects.toThrow(McpError);
+    expect(writes(f)).toEqual([]);
   });
 
-  it('startCombat rejects a malformed token id', async () => {
-    const { client } = buildClient({});
+  it('raises McpError when a requested token is not on the scene', async () => {
+    const f = setup({ scenes: [makeScene(true, [{ _id: TOKEN_A }])] });
+    await expect(handleStartCombat({ tokenIds: [TOKEN_B] }, f.client)).rejects.toThrow(McpError);
+    expect(writes(f)).toEqual([]);
+  });
+
+  it('rejects malformed ids and disabled writes before sending anything', async () => {
+    const f = setup();
+    await expect(f.client.startCombat('short', [])).rejects.toThrow(/Invalid sceneId/);
     await expect(
-      client.startCombat('sceneididididid1', [{ tokenId: 'short', sceneId: 'sceneididididid1' }]),
+      f.client.startCombat(SCENE_ID, [{ tokenId: 'short', sceneId: SCENE_ID }]),
     ).rejects.toThrow(/Invalid tokenId/);
+    const off = setup({}, { writeEnabled: false });
+    await expect(off.client.startCombat(SCENE_ID, [])).rejects.toThrow(/FOUNDRY_WRITE_ENABLED/);
+    expect(writes(f)).toEqual([]);
+    expect(writes(off)).toEqual([]);
+  });
+});
+
+describe('end_combat', () => {
+  it('ends the active combat and reports the encounter id', async () => {
+    const f = setup({ combats: [makeCombat()] });
+    const text = textOf(await handleEndCombat({}, f.client));
+    expect(text).toContain('Combat Ended');
+    expect(text).toContain(COMBAT_ID);
+    expect(f.world.combats).toEqual([]);
   });
 
-  it('startCombat rejects writes when FOUNDRY_WRITE_ENABLED is false', async () => {
-    const { client } = buildClient({ writeEnabled: false });
-    await expect(client.startCombat('sceneididididid1', [])).rejects.toThrow(
-      /FOUNDRY_WRITE_ENABLED/,
+  it('raises McpError when there is no active combat', async () => {
+    const f = setup();
+    await expect(handleEndCombat({}, f.client)).rejects.toThrow(McpError);
+    expect(writes(f)).toEqual([]);
+  });
+
+  it('rejects a Socket.IO connection that is not active', async () => {
+    const f = setup({ combats: [makeCombat()] });
+    (f.client as unknown as { socket: unknown }).socket = null;
+    await expect(f.client.endCombat(COMBAT_ID)).rejects.toThrow(/Socket\.IO connection/);
+  });
+});
+
+describe('set_initiative', () => {
+  it('sets initiative on the active combat by default', async () => {
+    const f = setup({ combats: [makeCombat()] });
+    const text = textOf(
+      await handleSetInitiative({ combatantId: COMBATANT_ID, initiative: 18 }, f.client),
     );
+    expect(text).toContain('Initiative Set');
+    expect(combatant(f, COMBATANT_ID)?.initiative).toBe(18);
   });
 
-  it('rejects writes when FOUNDRY_WRITE_ENABLED is false', async () => {
-    const { client } = buildClient({ writeEnabled: false });
-    await expect(client.updateCombat(COMBAT_ID, { turn: 1 })).rejects.toThrow(
-      /FOUNDRY_WRITE_ENABLED/,
+  it('honours an explicit combatId even when no combat is active', async () => {
+    const f = setup({ combats: [makeCombat({ active: false })] });
+    await handleSetInitiative(
+      { combatantId: COMBATANT_ID, initiative: 5, combatId: COMBAT_ID },
+      f.client,
     );
+    expect(combatant(f, COMBATANT_ID)?.initiative).toBe(5);
   });
 
-  it('rejects writes when the Socket.IO connection is not active', async () => {
-    const { client } = buildClient({ writeEnabled: true, connected: false });
-    await expect(client.endCombat(COMBAT_ID)).rejects.toThrow(/Socket\.IO connection/);
+  it('rejects a missing combatantId', async () => {
+    const f = setup({ combats: [makeCombat()] });
+    await expect(handleSetInitiative({ combatantId: '', initiative: 5 }, f.client)).rejects.toThrow(
+      McpError,
+    );
+    expect(writes(f)).toEqual([]);
   });
 
-  it('rejects a malformed combat id', async () => {
-    const { client } = buildClient({});
-    await expect(client.updateCombat('short', { turn: 1 })).rejects.toThrow(/Invalid combatId/);
+  it('rejects a non-finite initiative, at the handler and at the client', async () => {
+    const f = setup({ combats: [makeCombat()] });
+    await expect(
+      handleSetInitiative({ combatantId: COMBATANT_ID, initiative: Number.NaN }, f.client),
+    ).rejects.toThrow(McpError);
+    await expect(
+      f.client.setCombatantInitiative(COMBAT_ID, COMBATANT_ID, Number.POSITIVE_INFINITY),
+    ).rejects.toThrow(/Invalid initiative/);
+    expect(writes(f)).toEqual([]);
   });
 
-  it('rejects a malformed combatant id', async () => {
-    const { client } = buildClient({});
-    await expect(client.setCombatantInitiative(COMBAT_ID, 'short', 5)).rejects.toThrow(
+  it('raises McpError when no active combat and no combatId', async () => {
+    const f = setup();
+    await expect(
+      handleSetInitiative({ combatantId: COMBATANT_ID, initiative: 5 }, f.client),
+    ).rejects.toThrow(McpError);
+    expect(writes(f)).toEqual([]);
+  });
+
+  it('rejects malformed ids and combat updates when writes are disabled', async () => {
+    const f = setup({ combats: [makeCombat()] });
+    await expect(f.client.updateCombat('short', { turn: 1 })).rejects.toThrow(/Invalid combatId/);
+    await expect(f.client.setCombatantInitiative(COMBAT_ID, 'short', 5)).rejects.toThrow(
       /Invalid combatantId/,
     );
-  });
-
-  it('rejects a non-finite initiative at the client', async () => {
-    const { client } = buildClient({});
-    await expect(
-      client.setCombatantInitiative(COMBAT_ID, COMBATANT_ID, Number.POSITIVE_INFINITY),
-    ).rejects.toThrow(/Invalid initiative/);
+    const off = setup({ combats: [makeCombat()] }, { writeEnabled: false });
+    await expect(off.client.updateCombat(COMBAT_ID, { turn: 1 })).rejects.toThrow(
+      /FOUNDRY_WRITE_ENABLED/,
+    );
+    expect(writes(f)).toEqual([]);
   });
 });
 
 // --------------------------------------------------------------------------
 // #214: `Combat#turn` indexes the INITIATIVE-sorted turn order, not the stored
-// (creation) order of `combat.combatants`. The read tool (get_combat_state) and
-// the write tool (next_turn) must agree on that ordering.
+// (creation) order of `combat.combatants`.
 // --------------------------------------------------------------------------
 describe('initiative-ordered turn semantics (#214)', () => {
-  /**
-   * Stored (creation) order deliberately differs from initiative order:
-   *   stored:   Bob (5), Alice (18), Charlie (12)
-   *   initiative order: Alice (18), Charlie (12), Bob (5)
-   */
-  const makeUnsortedCombat = (overrides: Partial<WorldCombat> = {}): WorldCombat =>
-    makeCombat({
-      turn: 0,
-      round: 1,
-      combatants: [
-        { _id: 'bobbobbobbobbobb', name: 'Bob', initiative: 5, hidden: false, defeated: false },
-        { _id: 'alicealicealice1', name: 'Alice', initiative: 18, hidden: false, defeated: false },
-        {
-          _id: 'charliecharlie11',
-          name: 'Charlie',
-          initiative: 12,
-          hidden: false,
-          defeated: false,
-        },
-      ],
-      ...overrides,
-    });
-
-  const readCurrentName = async (combat: WorldCombat): Promise<string> => {
-    const client = {
-      getCombatState: vi.fn().mockReturnValue(combat),
-      getRawActor: vi.fn().mockReturnValue(undefined),
-    } as unknown as FoundryClient;
-    const text = (await handleGetCombatState({}, client)).content[0]?.text ?? '';
-    const line = text.split('\n').find((l) => l.includes('<-- CURRENT')) ?? '';
-    return /\*\*(.+?)\*\*/.exec(line)?.[1] ?? '';
-  };
-
   describe('getTurnOrder', () => {
     it('sorts by initiative descending without mutating the source array', () => {
       const combat = makeUnsortedCombat();
@@ -616,251 +458,116 @@ describe('initiative-ordered turn semantics (#214)', () => {
     expect(next).toEqual({ turn: 1, round: 2 });
     expect(getTurnOrder(combat)[next.turn]?.name).toBe('Charlie');
   });
-
-  it('next_turn names the same combatant get_combat_state marks as CURRENT', async () => {
-    const combat = makeUnsortedCombat({ turn: 0 });
-    const updateCombat = vi.fn();
-    const client = {
-      getCombatState: vi.fn().mockReturnValue(combat),
-      updateCombat,
-    } as unknown as FoundryClient;
-
-    const text = (await handleNextTurn({}, client)).content[0].text;
-
-    // Alice (18) -> Charlie (12), NOT Alice (stored index 1).
-    expect(text).toContain('**Now acting:** Charlie');
-    expect(updateCombat).toHaveBeenCalledWith(COMBAT_ID, { turn: 1, round: 1 });
-
-    // The cache then receives the write; the read tool must agree.
-    combat.turn = 1;
-    expect(await readCurrentName(combat)).toBe('Charlie');
-  });
-
-  it('keeps the same combatant acting after set_initiative reshuffles the turn order', async () => {
-    const combat = makeUnsortedCombat({ turn: 0 });
-    const alice = combat.combatants.find((c) => c.name === 'Alice');
-    if (!alice) {
-      throw new Error('fixture missing Alice');
-    }
-
-    // Before: order is Alice (18), Charlie (12), Bob (5) — turn 0 is Alice.
-    expect(await readCurrentName(combat)).toBe('Alice');
-
-    const setCombatantInitiative = vi.fn(() => {
-      // Mirror the cache broadcast: Alice drops to the bottom of the order.
-      alice.initiative = 1;
-    });
-    const updateCombat = vi.fn();
-    const client = {
-      getCombatState: vi.fn().mockReturnValue(combat),
-      setCombatantInitiative,
-      updateCombat,
-    } as unknown as FoundryClient;
-
-    await handleSetInitiative({ combatantId: alice._id, initiative: 1 }, client);
-    expect(setCombatantInitiative).toHaveBeenCalledWith(COMBAT_ID, alice._id, 1);
-
-    // Order is now Charlie (12), Bob (5), Alice (1). Core's `setupTurns`
-    // re-finds the combatant that was acting and re-points `turn` at it, so
-    // Alice — not whoever slid under index 0 — must still be acting.
-    expect(getTurnOrder(combat).map((c) => c.name)).toEqual(['Charlie', 'Bob', 'Alice']);
-    expect(updateCombat).toHaveBeenCalledWith(COMBAT_ID, { turn: 2 });
-
-    combat.turn = 2;
-    expect(await readCurrentName(combat)).toBe('Alice');
-
-    updateCombat.mockClear();
-    const text = (await handleNextTurn({}, client)).content[0].text;
-    expect(text).toContain('**Now acting:** Charlie');
-    expect(updateCombat).toHaveBeenCalledWith(COMBAT_ID, { turn: 0, round: 2 });
-
-    combat.turn = 0;
-    combat.round = 2;
-    expect(await readCurrentName(combat)).toBe('Charlie');
-  });
 });
 
 // --------------------------------------------------------------------------
 // #214 follow-up: changing any initiative re-sorts the turn order underneath
-// the stored `turn` index. FoundryVTT's `Combat#setupTurns` re-finds the
-// combatant that was acting and re-points `turn` at its new index; without the
-// same re-anchor here the MCP and Foundry disagree about whose turn it is.
+// the stored `turn` index. Foundry's `Combat#setupTurns` re-points `turn` at the
+// combatant that was acting; set_initiative must do the same.
 // --------------------------------------------------------------------------
 describe('set_initiative re-anchors Combat#turn', () => {
-  const ALICE = 'alicealicealice1';
-  const BOB = 'bobbobbobbobbobb';
-  const CHARLIE = 'charliecharlie11';
-
-  /**
-   * stored: Bob (5), Alice (18), Charlie (12) — initiative: Alice, Charlie, Bob.
-   *
-   * Deliberately shaped the way FoundryVTT actually persists a Combat: there is
-   * **no `started` field**. `Combat#started` is a client-side getter
-   * (`turns.length > 0 && round > 0`); `BaseCombat.defineSchema()` never
-   * declares it, so no document arriving over the `world` socket payload — nor
-   * any `modifyDocument` broadcast — carries one. A fixture that invents
-   * `started: true` hides a re-anchor that is dead against every real world.
-   */
-  const makeCombatFixture = (overrides: Partial<WorldCombat> = {}): WorldCombat => ({
-    _id: COMBAT_ID,
-    active: true,
-    round: 1,
-    turn: 0,
-    combatants: [
-      { _id: BOB, name: 'Bob', initiative: 5, hidden: false, defeated: false },
-      { _id: ALICE, name: 'Alice', initiative: 18, hidden: false, defeated: false },
-      { _id: CHARLIE, name: 'Charlie', initiative: 12, hidden: false, defeated: false },
-    ],
-    ...overrides,
-  });
-
-  /** Client whose `setCombatantInitiative` does NOT touch the fixture, so the
-   *  re-anchor cannot rely on the cache broadcast having landed first. */
-  const buildStaleCacheClient = (combat: WorldCombat) => {
-    const updateCombat = vi.fn();
-    const setCombatantInitiative = vi.fn();
-    const client = {
-      getCombatState: vi.fn().mockReturnValue(combat),
-      setCombatantInitiative,
-      updateCombat,
-    } as unknown as FoundryClient;
-    return { client, updateCombat, setCombatantInitiative };
+  const run = async (combat: WorldCombat, args: Row) => {
+    const f = setup({ combats: [combat] });
+    const result = await handleSetInitiative(args as never, f.client);
+    return { f, text: textOf(result) };
   };
 
-  it('re-anchors on a document with no `started` field, as FoundryVTT persists it', async () => {
-    // The regression guard for the whole describe block: `started` is not part
-    // of the persisted Combat schema, so reading it gates the re-anchor off on
-    // every real world while fabricated fixtures stay green.
-    const combat = makeCombatFixture({ turn: 0 });
+  it('keeps the same combatant acting after the order is reshuffled (no `started` field)', async () => {
+    const combat = makeUnsortedCombat({ turn: 0 });
     expect('started' in combat).toBe(false);
+    const { f } = await run(combat, { combatantId: ALICE, initiative: 1 });
+    // Order is now Charlie (12), Bob (5), Alice (1): Alice, still acting, is index 2.
+    expect(combatant(f, ALICE)?.initiative).toBe(1);
+    expect(serverCombat(f)?.turn).toBe(2);
+    expect(getTurnOrder(f.client.getCombatState() as WorldCombat).map((c) => c.name)).toEqual([
+      'Charlie',
+      'Bob',
+      'Alice',
+    ]);
 
-    const { client, updateCombat } = buildStaleCacheClient(combat);
-
-    await handleSetInitiative({ combatantId: ALICE, initiative: 1 }, client);
-
-    expect(updateCombat).toHaveBeenCalledWith(COMBAT_ID, { turn: 2 });
-  });
-
-  it('leaves `turn` alone when the combat has no combatants', async () => {
-    // Derived started-ness needs a turn order to point into.
-    const combat = makeCombatFixture({ turn: 0, combatants: [] });
-    const { client, updateCombat } = buildStaleCacheClient(combat);
-
-    await handleSetInitiative({ combatantId: ALICE, initiative: 1 }, client);
-
-    expect(updateCombat).not.toHaveBeenCalled();
-  });
-
-  it('follows the acting combatant when another combatant slides under the stored turn', async () => {
-    // Charlie is acting (initiative index 1). Bob jumps to 20 -> order becomes
-    // Bob, Alice, Charlie, so Charlie is now index 2.
-    const combat = makeCombatFixture({ turn: 1 });
-    const { client, updateCombat } = buildStaleCacheClient(combat);
-
-    await handleSetInitiative({ combatantId: BOB, initiative: 20 }, client);
-
-    expect(updateCombat).toHaveBeenCalledWith(COMBAT_ID, { turn: 2 });
-  });
-
-  it('re-anchors from the projected order even before the cache broadcast lands', async () => {
-    // The fixture is never mutated by the mocked write, so a re-anchor that
-    // re-read the cache would compute the OLD index and skip the update.
-    const combat = makeCombatFixture({ turn: 0 });
-    const { client, updateCombat } = buildStaleCacheClient(combat);
-
-    await handleSetInitiative({ combatantId: ALICE, initiative: 1 }, client);
-
-    expect(updateCombat).toHaveBeenCalledWith(COMBAT_ID, { turn: 2 });
-    expect(combat.combatants.find((c) => c._id === ALICE)?.initiative).toBe(18);
+    // And the next turn wraps from Alice to Charlie in round 2.
+    const next = textOf(await handleNextTurn({}, f.client));
+    expect(next).toContain('**Now acting:** Charlie');
+    expect(serverCombat(f)).toMatchObject({ turn: 0, round: 2 });
   });
 
   it('reports the still-acting combatant in the tool output', async () => {
-    const combat = makeCombatFixture({ turn: 0 });
-    const { client } = buildStaleCacheClient(combat);
-
-    const text = (await handleSetInitiative({ combatantId: ALICE, initiative: 1 }, client))
-      .content[0].text;
-
+    const { text } = await run(makeUnsortedCombat({ turn: 0 }), {
+      combatantId: ALICE,
+      initiative: 1,
+    });
     expect(text).toContain('**Initiative Set**');
     expect(text).toContain('Alice');
     expect(text).toContain('turn 3 of 3');
   });
 
+  it('leaves `turn` alone when the combat has no combatants', async () => {
+    const f = setup({ combats: [makeUnsortedCombat({ turn: 0, combatants: [] })] });
+    await expect(
+      handleSetInitiative({ combatantId: ALICE, initiative: 1 }, f.client),
+    ).rejects.toThrow();
+    expect(writes(f).filter((w) => w.type === 'Combat')).toEqual([]);
+  });
+
+  it('follows the acting combatant when another combatant slides under the stored turn', async () => {
+    // Charlie is acting (initiative index 1). Bob jumps to 20 -> Bob, Alice, Charlie.
+    const { f } = await run(makeUnsortedCombat({ turn: 1 }), { combatantId: BOB, initiative: 20 });
+    expect(serverCombat(f)?.turn).toBe(2);
+  });
+
   it('leaves `turn` alone when the acting combatant keeps its index', async () => {
-    // Alice is acting at index 0 and stays on top (18 -> 17 still beats 12).
-    const combat = makeCombatFixture({ turn: 0 });
-    const { client, updateCombat } = buildStaleCacheClient(combat);
-
-    await handleSetInitiative({ combatantId: ALICE, initiative: 17 }, client);
-
-    expect(updateCombat).not.toHaveBeenCalled();
+    const { f } = await run(makeUnsortedCombat({ turn: 0 }), {
+      combatantId: ALICE,
+      initiative: 17,
+    });
+    expect(combatant(f, ALICE)?.initiative).toBe(17);
+    expect(writes(f).filter((w) => w.type === 'Combat')).toEqual([]);
+    expect(serverCombat(f)?.turn).toBe(0);
   });
 
   it('leaves `turn` alone when no combatant is acting yet (turn null)', async () => {
-    const combat = makeCombatFixture({ turn: null });
-    const { client, updateCombat, setCombatantInitiative } = buildStaleCacheClient(combat);
-
-    await handleSetInitiative({ combatantId: ALICE, initiative: 1 }, client);
-
-    expect(setCombatantInitiative).toHaveBeenCalledWith(COMBAT_ID, ALICE, 1);
-    expect(updateCombat).not.toHaveBeenCalled();
+    const { f } = await run(makeUnsortedCombat({ turn: null }), {
+      combatantId: ALICE,
+      initiative: 1,
+    });
+    expect(combatant(f, ALICE)?.initiative).toBe(1);
+    expect(serverCombat(f)?.turn).toBeNull();
   });
 
   it('leaves `turn` alone before the encounter has started (round 0)', async () => {
-    // Pre-roll setup: initiatives get assigned before anyone is acting.
-    // Started-ness is derived from `round`, exactly as core derives it.
-    const combat = makeCombatFixture({ round: 0, turn: 0 });
-    const { client, updateCombat } = buildStaleCacheClient(combat);
-
-    await handleSetInitiative({ combatantId: ALICE, initiative: 1 }, client);
-
-    expect(updateCombat).not.toHaveBeenCalled();
+    // Pre-roll setup: started-ness is derived from `round`, as core derives it.
+    const { f } = await run(makeUnsortedCombat({ round: 0, turn: 0 }), {
+      combatantId: ALICE,
+      initiative: 1,
+    });
+    expect(combatant(f, ALICE)?.initiative).toBe(1);
+    expect(serverCombat(f)?.turn).toBe(0);
   });
 
   it('leaves `turn` alone when the stored index resolves to no combatant', async () => {
-    const combat = makeCombatFixture({ turn: 9 });
-    const { client, updateCombat, setCombatantInitiative } = buildStaleCacheClient(combat);
-
-    await expect(
-      handleSetInitiative({ combatantId: ALICE, initiative: 1 }, client),
-    ).resolves.toBeDefined();
-
-    expect(setCombatantInitiative).toHaveBeenCalledWith(COMBAT_ID, ALICE, 1);
-    expect(updateCombat).not.toHaveBeenCalled();
-  });
-
-  it('still writes the initiative when the target combatant is unknown to the cache', async () => {
-    const combat = makeCombatFixture({ turn: 0 });
-    const { client, updateCombat, setCombatantInitiative } = buildStaleCacheClient(combat);
-
-    await handleSetInitiative({ combatantId: 'ffffffffffffffff', initiative: 30 }, client);
-
-    expect(setCombatantInitiative).toHaveBeenCalledWith(COMBAT_ID, 'ffffffffffffffff', 30);
-    expect(updateCombat).not.toHaveBeenCalled();
+    const { f } = await run(makeUnsortedCombat({ turn: 9 }), { combatantId: ALICE, initiative: 1 });
+    expect(combatant(f, ALICE)?.initiative).toBe(1);
+    expect(serverCombat(f)?.turn).toBe(9);
   });
 
   it('does not re-anchor a combat other than the active one', async () => {
-    // Only the active combat is readable from the cache, so an explicit
-    // `combatId` for some other encounter has no turn order to recompute.
-    const combat = makeCombatFixture({ turn: 0 });
-    const { client, updateCombat, setCombatantInitiative } = buildStaleCacheClient(combat);
-    const otherCombatId = 'ffffffffffff0000';
-
+    const other = { ...makeUnsortedCombat({ turn: 0 }), _id: 'ffffffffffff0000', active: false };
+    const f = setup({ combats: [makeUnsortedCombat({ turn: 0 }), other] });
     await handleSetInitiative(
-      { combatantId: ALICE, initiative: 1, combatId: otherCombatId },
-      client,
+      { combatantId: ALICE, initiative: 1, combatId: 'ffffffffffff0000' },
+      f.client,
     );
-
-    expect(setCombatantInitiative).toHaveBeenCalledWith(otherCombatId, ALICE, 1);
-    expect(updateCombat).not.toHaveBeenCalled();
+    expect(combatant(f, ALICE, 'ffffffffffff0000')?.initiative).toBe(1);
+    expect(serverCombat(f)?.turn).toBe(0);
+    expect(serverCombat(f, 'ffffffffffff0000')?.turn).toBe(0);
   });
 
   it('re-anchors when the active combat is named explicitly', async () => {
-    const combat = makeCombatFixture({ turn: 0 });
-    const { client, updateCombat } = buildStaleCacheClient(combat);
-
-    await handleSetInitiative({ combatantId: ALICE, initiative: 1, combatId: COMBAT_ID }, client);
-
-    expect(updateCombat).toHaveBeenCalledWith(COMBAT_ID, { turn: 2 });
+    const { f } = await run(makeUnsortedCombat({ turn: 0 }), {
+      combatantId: ALICE,
+      initiative: 1,
+      combatId: COMBAT_ID,
+    });
+    expect(serverCombat(f)?.turn).toBe(2);
   });
 });
