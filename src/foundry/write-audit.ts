@@ -331,5 +331,8 @@ export class WriteAudit {
 
 /** Display names for an entry from its documents/updates. */
 export function namesOf(docs: Array<Record<string, unknown>> | undefined): string[] {
-  return (docs ?? []).map((d) => d.name).filter((n): n is string => typeof n === 'string');
+  // Unnamed documents (a Combat's name is "") are left out, so the log shows an id count.
+  return (docs ?? [])
+    .map((d) => d.name)
+    .filter((n): n is string => typeof n === 'string' && n !== '');
 }
