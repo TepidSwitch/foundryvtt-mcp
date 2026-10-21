@@ -132,7 +132,7 @@ function caveatFor(fx: EffectSummary | null): string {
   if (!fx) {
     return CAVEAT;
   }
-  return `_Computed from the raw world data with numeric active-effect changes applied. Dice and formula bonuses (Bless, Bardic Inspiration, "+1d4"), roll modifiers, and bonuses that are not effects (e.g. Tough) are not included, and only equipped armor counts toward AC.${fx.unresolved > 0 ? ` ${fx.unresolved} effect changes could not be evaluated.` : ''}_`;
+  return `_Computed from the raw world data with active-effect changes applied (numeric values, formula bonuses such as Bless or Rage damage, and advantage/disadvantage). Not included: conditional or situational bonuses, effects that need Foundry's runtime (modules, macros, item overrides), and bonuses that are not effects (e.g. Tough). Only equipped armor counts toward AC.${fx.unresolved > 0 ? ` ${fx.unresolved} effect changes could not be evaluated.` : ''}_`;
 }
 
 // ---------------------------------------------------------------------------

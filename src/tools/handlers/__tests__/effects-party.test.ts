@@ -202,7 +202,7 @@ describe('applyEffects', () => {
     expect(s.attributes.hp.tempmax).toBe(5);
   });
 
-  it('counts dice, formula and non-system changes as unresolved instead of guessing', () => {
+  it('resolves formula bonuses and counts non-system changes as unresolved', () => {
     const a = actor({
       effects: [
         effect('Bless', [{ key: 'system.bonuses.abilities.save', type: 'add', value: '+1d4' }]),
@@ -213,8 +213,8 @@ describe('applyEffects', () => {
       ],
     });
     const { summary } = applyEffects(a);
-    expect(summary.applied).toEqual([]);
-    expect(summary.unresolved).toBe(3);
+    expect(summary.applied).toEqual(['Bless: saves +1d4', 'Evasive: DEX saves +0']);
+    expect(summary.unresolved).toBe(1);
   });
 
   it('reads the legacy `changes` array with numeric modes', () => {
@@ -371,7 +371,7 @@ describe('sheet output', () => {
     expect(out).toContain('**Hit dice** 3/5 d10');
     expect(out).toContain('**Active effects** Shield · Concentrating: Bless');
     expect(out).toContain('**Effect bonuses applied** Shield: AC +5');
-    expect(out).toContain('numeric active-effect changes applied');
+    expect(out).toContain('active-effect changes applied');
   });
 
   it('shows death saves at 0 HP', () => {

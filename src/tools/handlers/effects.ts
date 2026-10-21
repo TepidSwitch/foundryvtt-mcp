@@ -8,9 +8,10 @@
  * result are closer to what the player sees without pretending to be exact.
  *
  * Supported: ability scores, AC bonus and AC calculation, movement, senses,
- * max-HP adjustments and damage/condition trait lists. Not evaluated: dice or
- * formula values ("+1d4", "@abilities.int.mod"), roll-mode changes, item and
- * activity overrides, and macro/module keys.
+ * max-HP adjustments and damage/condition trait lists, attack/damage/save/check/
+ * spell-DC bonuses (numeric or formula, with @scale/@prof/@abilities references
+ * resolved by ./rolldata.ts) and advantage/disadvantage roll modes. Not
+ * evaluated: item and activity overrides, and macro/module keys.
  *
  * FoundryVTT v14 stores changes at `effect.system.changes` with a string
  * `type`; older data uses `effect.changes` with a numeric `mode`. Both are read.
@@ -18,6 +19,7 @@
 
 import type { WorldActor, WorldItem } from '../../foundry/types.js';
 import { at, buildSheet, isRec, itemSys, itemsOf, type Sheet, str, toNum } from './dnd5e.js';
+import { buildRollContext, type RollContext, resolveValue } from './rolldata.js';
 
 type Rec = Record<string, unknown>;
 
@@ -50,7 +52,7 @@ export interface EffectSummary {
   current: ActiveEffectInfo[];
   /** Human-readable list of the changes that were applied. */
   applied: string[];
-  /** Count of changes that could not be evaluated (dice, formulas, roll modes). */
+  /** Count of changes that could not be evaluated (unknown references, module keys). */
   unresolved: number;
 }
 
@@ -183,9 +185,136 @@ function describe(name: string, what: string, type: string, n: number): string {
   return `${name}: ${what} ${amount}`;
 }
 
-/** Applies one change to the cloned system data. Returns a description, or null if unsupported. */
-function applyChange(system: Rec, change: EffectChange): string | null {
+// ---------------------------------------------------------------------------
+// Formula bonuses and roll modes
+// ---------------------------------------------------------------------------
+
+/** effect name -> direction -> targets, collected so one effect yields one readable line. */
+type RollModes = Map<string, { adv: ModeTargets; dis: ModeTargets }>;
+interface ModeTargets {
+  /** ability -> kinds ("checks" | "saves") */
+  abilities: Map<string, Set<string>>;
+  other: string[];
+}
+
+const ATTACK_KINDS: Record<string, string> = {
+  mwak: 'melee weapon',
+  rwak: 'ranged weapon',
+  msak: 'melee spell',
+  rsak: 'ranged spell',
+};
+const BONUS_KEY =
+  /^system\.bonuses\.(?:(mwak|rwak|msak|rsak)\.(attack|damage)|abilities\.(check|save|skill)|spell\.dc)$/;
+const ABILITY_BONUS_KEY = /^system\.abilities\.(str|dex|con|int|wis|cha)\.bonuses\.(check|save)$/;
+const ROLL_MODE_KEY =
+  /^system\.(?:abilities\.(str|dex|con|int|wis|cha)\.(check|save)|skills\.([a-z]+)|attributes\.(init))\.roll\.mode$/;
+
+function signed(v: number | string): string {
+  if (typeof v === 'number') {
+    return sign(v);
+  }
+  return /^[+-]/.test(v) ? v : `+${v}`;
+}
+
+function newTargets(): ModeTargets {
+  return { abilities: new Map(), other: [] };
+}
+
+/**
+ * Handles formula bonus keys and roll-mode keys. Returns undefined when the key
+ * is not one of them (so numeric handling continues), a description when
+ * applied, an empty string when recognised and recorded for later (roll
+ * modes), or null when recognised but not evaluable.
+ */
+function applyBonusOrMode(
+  system: Rec,
+  change: EffectChange,
+  actor: WorldActor,
+  modes: RollModes,
+): string | null | undefined {
   const { key, type, value, effectName } = change;
+  const bonus = key.match(BONUS_KEY);
+  const abilityBonus = key.match(ABILITY_BONUS_KEY);
+  const mode = key.match(ROLL_MODE_KEY);
+  if (!bonus && !abilityBonus && !mode) {
+    return undefined;
+  }
+  const ctx: RollContext = buildRollContext(actor, system);
+  const r = resolveValue(value, ctx);
+  if (r.unresolved.length > 0) {
+    return null;
+  }
+
+  if (mode) {
+    const n = typeof r.value === 'number' ? Math.sign(r.value) : 0;
+    if (type !== 'add' || n === 0) {
+      return null;
+    }
+    const entry = modes.get(effectName) ?? { adv: newTargets(), dis: newTargets() };
+    modes.set(effectName, entry);
+    const targets = n > 0 ? entry.adv : entry.dis;
+    if (mode[1]) {
+      const kinds = targets.abilities.get(mode[1]) ?? new Set<string>();
+      kinds.add(mode[2] === 'save' ? 'saves' : 'checks');
+      targets.abilities.set(mode[1], kinds);
+    } else if (mode[3]) {
+      targets.other.push(`${mode[3]} checks`);
+    } else {
+      targets.other.push('initiative');
+    }
+    return '';
+  }
+
+  if (type !== 'add' || (typeof r.value === 'string' && r.value === '')) {
+    return null;
+  }
+  let what: string;
+  if (abilityBonus) {
+    what = `${(abilityBonus[1] as string).toUpperCase()} ${abilityBonus[2] === 'save' ? 'saves' : 'checks'}`;
+  } else if (bonus?.[1]) {
+    what = `${ATTACK_KINDS[bonus[1]]} ${bonus[2]}`;
+  } else if (bonus?.[3]) {
+    what = { check: 'ability checks', save: 'saves', skill: 'skill checks' }[bonus[3]] as string;
+  } else {
+    what = 'spell DC';
+  }
+  return `${effectName}: ${what} ${signed(r.value)}`;
+}
+
+function describeModes(modes: RollModes): string[] {
+  const out: string[] = [];
+  for (const [name, entry] of modes) {
+    for (const [label, targets] of [
+      ['advantage', entry.adv],
+      ['disadvantage', entry.dis],
+    ] as const) {
+      // abilities sharing the same kinds are listed together: "STR/DEX checks and saves"
+      const bySet = new Map<string, string[]>();
+      for (const [abl, kinds] of targets.abilities) {
+        const k = [...kinds].sort().join(' and ');
+        bySet.set(k, [...(bySet.get(k) ?? []), abl.toUpperCase()]);
+      }
+      const parts = [...bySet].map(([k, abls]) => `${abls.join('/')} ${k}`).concat(targets.other);
+      if (parts.length > 0) {
+        out.push(`${name}: ${label} on ${parts.join(', ')}`);
+      }
+    }
+  }
+  return out;
+}
+
+/** Applies one change to the cloned system data. Returns a description, or null if unsupported. */
+function applyChange(
+  system: Rec,
+  change: EffectChange,
+  actor: WorldActor,
+  modes: RollModes,
+): string | null {
+  const { key, type, value, effectName } = change;
+  const special = applyBonusOrMode(system, change, actor, modes);
+  if (special !== undefined) {
+    return special;
+  }
 
   // Reference to the actor's own walk speed, e.g. Spider Climb / Alter Self
   const movement = at(system, 'attributes', 'movement');
@@ -326,6 +455,7 @@ export function applyEffects(actor: WorldActor): AppliedEffects {
   const system = structuredClone(actor.system) as Rec;
   const applied: string[] = [];
   let unresolved = 0;
+  const modes: RollModes = new Map();
   for (const change of changes) {
     if (!change.key.startsWith('system.')) {
       // items.*, flags.*, ATL.*, macro.*, StatusEffect… — not evaluated
@@ -334,13 +464,14 @@ export function applyEffects(actor: WorldActor): AppliedEffects {
       }
       continue;
     }
-    const description = applyChange(system, change);
+    const description = applyChange(system, change, actor, modes);
     if (description) {
       applied.push(description);
-    } else {
+    } else if (description === null) {
       unresolved++;
     }
   }
+  applied.push(...describeModes(modes));
   return { actor: { ...actor, system }, summary: { current, applied, unresolved } };
 }
 
