@@ -78,6 +78,11 @@ export function expandPaths(obj: Record<string, unknown>): Record<string, unknow
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj)) {
     const parts = key.split('.');
+    // Broadcasts are untrusted: `__proto__.x` would otherwise walk into
+    // Object.prototype and write there.
+    if (parts.some((part) => FORBIDDEN_KEYS.has(part))) {
+      continue;
+    }
     let cur = out;
     for (const part of parts.slice(0, -1)) {
       const next = cur[part];
@@ -103,6 +108,9 @@ function deepMergeInto(
   src: Record<string, unknown>,
 ): Record<string, unknown> {
   for (const [k, v] of Object.entries(src)) {
+    if (FORBIDDEN_KEYS.has(k)) {
+      continue;
+    }
     if (isForcedDeletion(v)) {
       delete target[k];
       continue;
@@ -303,9 +311,11 @@ function applyToCollection(
       continue;
     }
 
-    // update: FoundryVTT broadcasts the diff, so merge rather than replace.
+    // update: FoundryVTT broadcasts the diff, so merge rather than replace. Our
+    // own writes may carry dot-path keys (`texture.src`); expand them first or
+    // the cache would gain a literal "texture.src" key and keep the old value.
     if (existing) {
-      mergePatch(existing, doc);
+      mergePatch(existing, expandPaths(doc));
       changed = true;
     }
   }
