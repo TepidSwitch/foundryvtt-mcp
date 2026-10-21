@@ -178,7 +178,9 @@ function sanitize(doc: Record<string, unknown>): Record<string, unknown> {
 
 /**
  * Recursively merges `patch` into `target`, matching FoundryVTT's own update
- * semantics: keys merge, `null` deletes, arrays replace wholesale.
+ * semantics: keys merge, `null` deletes, arrays replace wholesale, except arrays
+ * of `_id`-keyed documents (embedded collections such as a playlist's sounds),
+ * which merge by `_id` because Foundry broadcasts only the changed entries.
  *
  * Prototype-polluting keys are dropped rather than merged (see
  * {@link FORBIDDEN_KEYS}).
@@ -196,31 +198,35 @@ function mergePatch(target: Record<string, unknown>, patch: Record<string, unkno
       mergePatch(target[key] as Record<string, unknown>, value);
       continue;
     }
-    const current = target[key];
-    if (
-      Array.isArray(value) &&
-      Array.isArray(current) &&
-      value.length > 0 &&
-      isIdRecordArray(value) &&
-      isIdRecordArray(current)
-    ) {
-      // A parent update carrying partial embedded docs (a playlist update with
-      // `sounds: [{_id, playing}]`) merges by `_id`; replacing the array would
-      // wipe the other fields (names, paths) of those embedded docs.
-      for (const part of value) {
-        const existing = current.find((d) => d._id === part._id);
-        if (existing) {
-          mergePatch(existing, part);
-        }
-      }
+    if (isIdKeyedArray(value) && isIdKeyedArray(target[key])) {
+      mergeById(target[key] as Array<Record<string, unknown>>, value);
       continue;
     }
     target[key] = value;
   }
 }
 
-function isIdRecordArray(arr: unknown[]): arr is Array<Record<string, unknown>> {
-  return arr.every((e) => isRecord(e) && typeof e._id === 'string');
+function isIdKeyedArray(value: unknown): value is Array<Record<string, unknown>> {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((entry) => isRecord(entry) && typeof entry._id === 'string')
+  );
+}
+
+/** Merges embedded-document patches into `target` by `_id`, appending unknown ids. */
+function mergeById(
+  target: Array<Record<string, unknown>>,
+  patch: Array<Record<string, unknown>>,
+): void {
+  for (const entry of patch) {
+    const existing = target.find((doc) => doc._id === entry._id);
+    if (existing) {
+      mergePatch(existing, entry);
+    } else {
+      target.push(sanitize(entry));
+    }
+  }
 }
 
 /**

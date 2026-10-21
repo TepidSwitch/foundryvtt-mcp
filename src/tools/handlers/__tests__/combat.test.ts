@@ -129,7 +129,7 @@ describe('handleGetCombatState', () => {
       system: {
         attributes: {
           hp: { value: 12, max: 20 },
-          ac: { value: 14 },
+          ac: { calc: 'natural', flat: 14 },
         },
       },
     };
@@ -144,6 +144,94 @@ describe('handleGetCombatState', () => {
     expect(client.getRawActor).toHaveBeenCalledWith('actor-99');
     expect(text).toContain('HP: 12/20');
     expect(text).toContain('AC: 14');
+  });
+
+  it('names a combatant from its token, then its actor, when the combatant has no name', async () => {
+    const combat = buildCombat({
+      combatants: [
+        buildCombatant({
+          _id: 'a',
+          name: undefined as unknown as string,
+          initiative: 20,
+          tokenId: 't1',
+          sceneId: 's1',
+        }),
+        buildCombatant({ _id: 'b', name: '', initiative: 10, actorId: 'actor-7' }),
+        buildCombatant({ _id: 'c', name: undefined as unknown as string, initiative: 5 }),
+      ],
+    });
+    const client = {
+      getCombatState: vi.fn().mockReturnValue(combat),
+      findToken: vi
+        .fn()
+        .mockImplementation((id: string) =>
+          id === 't1' ? { scene: {}, token: { _id: 't1', name: 'Warlord' } } : null,
+        ),
+      getRawActor: vi
+        .fn()
+        .mockImplementation((id: string) =>
+          id === 'actor-7'
+            ? { _id: 'actor-7', name: 'Sule Freescar', type: 'character', system: {} }
+            : undefined,
+        ),
+    } as unknown as FoundryClient;
+
+    const text = getText(await handleGetCombatState({}, client));
+
+    expect(text).not.toContain('undefined');
+    expect(text).toContain('**Warlord**');
+    expect(text).toContain('**Sule Freescar**');
+    expect(text).toContain('**Unknown combatant**');
+  });
+
+  it('says the encounter has not started in round 0, and names the current turn once it has', async () => {
+    const notStarted = buildCombat({
+      round: 0,
+      turn: null,
+      combatants: [buildCombatant({ name: 'Orc', initiative: 12 })],
+    });
+    const started = buildCombat({
+      round: 2,
+      turn: 1,
+      combatants: [
+        buildCombatant({ _id: 'a', name: 'Alice', initiative: 18 }),
+        buildCombatant({ _id: 'b', name: 'Bob', initiative: 5 }),
+      ],
+    });
+    const make = (combat: WorldCombat) =>
+      ({
+        getCombatState: vi.fn().mockReturnValue(combat),
+        getRawActor: vi.fn().mockReturnValue(undefined),
+      }) as unknown as FoundryClient;
+
+    expect(getText(await handleGetCombatState({}, make(notStarted)))).toContain('not started');
+    expect(getText(await handleGetCombatState({}, make(started)))).toContain('current turn: Bob');
+  });
+
+  it("prefers an unlinked token's own HP over the base actor", async () => {
+    const combat = buildCombat({
+      combatants: [
+        buildCombatant({ name: 'Ushabti', actorId: 'actor-1', tokenId: 't1', sceneId: 's1' }),
+      ],
+    });
+    const client = {
+      getCombatState: vi.fn().mockReturnValue(combat),
+      findToken: vi.fn().mockReturnValue({
+        scene: {},
+        token: { _id: 't1', delta: { system: { attributes: { hp: { value: 30 } } } } },
+      }),
+      getRawActor: vi.fn().mockReturnValue({
+        _id: 'actor-1',
+        name: 'Ushabti',
+        type: 'npc',
+        system: { attributes: { hp: { value: 97, max: 97 }, ac: { calc: 'natural', flat: 15 } } },
+      }),
+    } as unknown as FoundryClient;
+
+    const text = getText(await handleGetCombatState({}, client));
+
+    expect(text).toContain('HP: 30/97');
+    expect(text).toContain('AC: 15');
   });
 
   it('omits HP/AC when raw actor lookup returns undefined', async () => {

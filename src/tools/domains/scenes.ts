@@ -226,7 +226,7 @@ export const tokensEditTool = new DomainTool({
     }),
     move: action({
       description:
-        "Move a token to absolute pixel coordinates on its scene (not grid squares, not offsets). The token is found across scenes by id, optionally scoped with sceneId. No tool reports a token's current position or grid size, so ask the user for the destination rather than guessing.",
+        "Move a token to absolute pixel coordinates on its scene (not grid squares, not offsets). The token is found across scenes by id, optionally scoped with sceneId. foundry_scenes get lists each token's current position in map squares and in these canvas pixels (padding included); to move to a map square, canvas px = map square × grid size + the scene's Map origin.",
       schema: z.object({
         tokenId: z.string().describe('Id of the token to move'),
         x: z.number().describe('Target x in pixels'),
