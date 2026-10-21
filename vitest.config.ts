@@ -12,10 +12,11 @@ export default defineConfig({
     },
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html'],
+      reporter: ['text-summary', 'text', 'html'],
       include: ['src/**/*.ts'],
       exclude: [
         'src/**/*.test.ts',
+        'src/**/__tests__/**',
         'src/**/*.d.ts',
         'src/types/**/*',
       ],
