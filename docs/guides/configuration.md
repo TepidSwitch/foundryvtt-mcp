@@ -99,4 +99,4 @@ Your FoundryVTT user needs:
 
 ### Diagnostics
 
-`foundry_diagnostics` (actions `health`, `system`, `search_logs`, `logs`, `diagnose`) needs no Foundry module: health comes from the world snapshot and the log actions read this server's own log buffer. The `diagnose` action is a fixed stub. The old REST bridge and `FOUNDRY_API_KEY` were removed; a leftover `FOUNDRY_API_KEY` is ignored with a startup warning. See [fork-setup.md](fork-setup.md#diagnostics).
+`foundry_diagnostics` (actions `health`, `system`, `search_logs`, `logs`, `diagnose`) needs no Foundry module: health comes from the world snapshot and the log actions read this server's own log buffer. `diagnose` groups those errors by category with fix suggestions. The old REST bridge and `FOUNDRY_API_KEY` were removed; a leftover `FOUNDRY_API_KEY` is ignored with a startup warning. See [fork-setup.md](fork-setup.md#diagnostics).

@@ -112,7 +112,7 @@ All features work out of the box with username/password authentication:
 - `health` - connection, login role, world data age
 - `system` - versions, users, modules, log buffer and error rate
 - `logs` / `search_logs` - recent MCP log entries, or a search over them
-- `diagnose` - **stub**: returns a fixed "no errors detected" summary
+- `diagnose` - recent errors grouped by category (connection, authentication, write) with fix suggestions
 
 ## Testing Your Setup
 

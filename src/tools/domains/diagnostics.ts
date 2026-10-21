@@ -79,9 +79,19 @@ export const diagnosticsTool = new DomainTool({
     }),
     diagnose: action({
       description:
-        'Stub: returns a fixed "no errors detected" summary regardless of input and reflects nothing about the server. Use logs for real content.',
+        "Groups recent errors from the MCP server's own log buffer (connection, login, write refusals; not Foundry's server log) by category, with the latest messages, fix suggestions and a health score.",
       schema: z.object({
-        category: z.string().optional().describe('Error category'),
+        category: z
+          .enum(['connection', 'authentication', 'write', 'other'])
+          .optional()
+          .describe('Only this category'),
+        timeframe_seconds: z
+          .number()
+          .int()
+          .min(60)
+          .max(86400)
+          .optional()
+          .describe('Look back this far (default 3600)'),
       }),
       run: (a) => handleDiagnoseErrors(a),
     }),

@@ -97,10 +97,19 @@ const CATEGORIES: Array<[string, RegExp, string]> = [
   ['tool', /tool execution failed|failed to/i, 'See the individual tool errors below.'],
 ];
 
-export function localDiagnoseErrors(timeframeSeconds = 3600): ErrorDiagnosis {
+/** The category an MCP log message falls into ('other' when none matches). */
+function categoryOf(message: string): string {
+  return CATEGORIES.find(([, re]) => re.test(message))?.[0] ?? 'other';
+}
+
+/** Category names `localDiagnoseErrors` can report, `other` last. */
+export const ERROR_CATEGORIES = [...CATEGORIES.map(([name]) => name), 'other'];
+
+export function localDiagnoseErrors(timeframeSeconds = 3600, category?: string): ErrorDiagnosis {
   const errors = getBufferedLogs()
     .filter((l) => l.level === 'error')
-    .filter((l) => inTimeframe(l, timeframeSeconds));
+    .filter((l) => inTimeframe(l, timeframeSeconds))
+    .filter((l) => !category || categoryOf(l.message) === category);
   const categories: Record<string, number> = {};
   const hints = new Map<string, string>();
   for (const e of errors) {

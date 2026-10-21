@@ -6,6 +6,7 @@
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { DiagnosticsClient } from '../../diagnostics/client.js';
+import { ERROR_CATEGORIES, localDiagnoseErrors } from '../../diagnostics/local.js';
 import { assessRole } from '../../diagnostics/role.js';
 import type { LogEntry } from '../../diagnostics/types.js';
 import { LogEntrySchema } from '../../diagnostics/types.js';
@@ -293,48 +294,56 @@ ${performanceLines.join('\n')}
 /**
  * Handles error diagnosis requests
  */
-export async function handleDiagnoseErrors(args: { category?: string }) {
-  const { category } = args;
+export async function handleDiagnoseErrors(args: {
+  category?: string;
+  timeframe_seconds?: number;
+}) {
+  const { category, timeframe_seconds: timeframe = 3600 } = args;
+  if (category && !ERROR_CATEGORIES.includes(category)) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `Unknown category "${category}". Use one of: ${ERROR_CATEGORIES.join(', ')}.`,
+    );
+  }
 
   return withToolError('diagnose errors', async () => {
-    // Mock diagnosis since the method doesn't exist yet
-    const diagnosis = {
-      errors: [],
-      recommendations: ['No specific errors detected', 'System appears to be functioning normally'],
-      systemStatus: 'Operational',
-    };
-
-    const errorsByCategory = diagnosis.errors.reduce(
-      (acc: Record<string, unknown[]>, error: { category: string }) => {
-        if (!acc[error.category]) {
-          acc[error.category] = [];
-        }
-        acc[error.category]?.push(error);
-        return acc;
-      },
-      {},
-    );
-
-    const errorSummary =
-      Object.entries(errorsByCategory)
-        .map(([cat, errors]: [string, unknown[]]) => `**${cat}:** ${errors.length} error(s)`)
-        .join('\n') || 'No errors found';
+    const d = localDiagnoseErrors(timeframe, category);
+    const { totalErrors, uniqueErrors, categories } = d.summary;
+    const byCategory =
+      Object.entries(categories)
+        .sort(([, a], [, b]) => b - a)
+        .map(([name, count]) => `- **${name}:** ${count}`)
+        .join('\n') || '- none';
+    const recent =
+      d.recentErrors
+        .slice(-5)
+        .reverse()
+        .map((e) => `- ${e.timestamp} ${e.message.slice(0, 200)}`)
+        .join('\n') || '- none';
+    const suggestions =
+      d.suggestions
+        .map((sg) => `- **${sg.category}** (${sg.priority}): ${sg.suggestion}`)
+        .join('\n') ||
+      (totalErrors > 0
+        ? '- No known pattern; see the recent errors above, or foundry_diagnostics logs.'
+        : '- Nothing to fix.');
 
     return {
       content: [
         {
           type: 'text',
-          text: `🔧 **Error Diagnosis**
-**Category Filter:** ${category || 'All categories'}
-**Total Errors:** ${diagnosis.errors.length}
+          text: `🔧 **Error Diagnosis** (last ${timeframe}s${category ? `, category ${category}` : ''})
+_From the MCP server's own log buffer (connection, login, writes), not Foundry's server log._
+**Errors:** ${totalErrors} (${uniqueErrors} distinct) · **Health score:** ${d.healthScore}/100
 
-**Error Summary:**
-${errorSummary}
+**By category:**
+${byCategory}
 
-**Recommendations:**
-${diagnosis.recommendations.map((rec: string) => `- ${rec}`).join('\n')}
+**Most recent:**
+${recent}
 
-**System Status:** ${diagnosis.systemStatus}`,
+**Suggestions:**
+${suggestions}`,
         },
       ],
     };

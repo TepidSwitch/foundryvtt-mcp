@@ -206,8 +206,9 @@ world data is.
 `foundry_diagnostics` (`health`, `system`, `search_logs`, `logs`, `diagnose`) needs
 no Foundry module. Health is computed from the world snapshot (version, system,
 users online, active modules, connection and staleness); the log actions read this
-MCP server's own recent log (logins, tool failures, write errors). `diagnose` is a
-fixed stub. Foundry's own server log, uptime and memory are not available. The REST
+MCP server's own recent log (logins, tool failures, write errors). `diagnose` groups
+those errors by category (`connection`, `authentication`, `write`, `other`) with fix
+suggestions; `timeframe_seconds` sets how far back it looks. Foundry's own server log, uptime and memory are not available. The REST
 bridge and `FOUNDRY_API_KEY` were removed; a leftover `FOUNDRY_API_KEY` is ignored
 with a startup warning.
 
