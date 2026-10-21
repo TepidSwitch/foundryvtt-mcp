@@ -6,7 +6,7 @@ Model Context Protocol (MCP) server bridging AI assistants with FoundryVTT table
 
 - **Language**: TypeScript (ES modules, `.js` imports for MCP SDK compatibility)
 - **Runtime**: Node.js (Bun as package manager)
-- **Test**: Vitest (unit + integration), Playwright (E2E)
+- **Test**: Vitest (unit, fake-socket), Playwright (E2E)
 - **Lint/Format**: Biome (linting + formatting)
 - **Validation**: Zod schemas
 
@@ -16,7 +16,6 @@ Model Context Protocol (MCP) server bridging AI assistants with FoundryVTT table
 bun run build          # Compile TypeScript
 bun run dev            # Development mode with hot reload
 bun test               # Unit tests (Vitest)
-bun run test:integration # Integration tests (needs :30001 container + .env.integration — prefer `just test-integration-docker`)
 bun run test:e2e       # E2E tests (Playwright, headless)
 bun run lint           # Lint code (Biome)
 bun run lint:fix       # Auto-fix lint issues
@@ -91,7 +90,7 @@ Foundry and dnd5e client source for checking field names lives outside the repo 
 
 See `.claude/rules/` for detailed guidelines:
 - `development.md` — TDD workflow, commit conventions, build commands
-- `testing.md` — Test tiers (unit, integration, E2E) and requirements
+- `testing.md` — Test tiers (unit, E2E) and requirements
 - `foundry-write-protocol.md` — transport and the `modifyDocument` write protocol
 - `document-management.md` — Document detection and organization
 
