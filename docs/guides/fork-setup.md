@@ -191,6 +191,22 @@ finishes the image is uploaded and an inactive scene is created. Jobs are kept i
 so a server restart forgets them (the render itself continues in ComfyUI). The workflow
 and prompt wording come from the foundry-vtt-mcp bridge by adambdooley (MIT).
 
+Map options (`foundry_generate_edit map`):
+
+| Option | Effect |
+|---|---|
+| `quality` | `low` 8 steps (quick draft), `medium` 20 (default), `high` 35 |
+| `size` / `width` / `height` | Above 1024px the map renders at 1024 first, then is upscaled and refined at half strength and decoded in tiles |
+| `cfg` | Guidance scale, 1 to 4 (default 2.5); try 2 for lava or snow |
+| `avoid` | Extra terms appended to the negative prompt |
+| `create_scene: false` | Render only: the image stays in ComfyUI's output folder, no upload or scene; `map_status` gives the file name and seed |
+
+`foundry_generate_edit import_map` makes an inactive scene from a PNG on the machine
+running this server, without rendering. Describe terrain and features as tags; naming a
+building can make the model draw one. Close other apps first: loading the checkpoint
+needs several GB of free RAM. The plan and its unverified live checks are in
+`.claude/specs/map-quality.md`.
+
 ## Startup behaviour
 
 The server answers Claude's MCP handshake immediately and logs in to Foundry in
