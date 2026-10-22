@@ -114,3 +114,6 @@ data/
 # Test files
 test-results/
 playwright-report/
+
+# npm lockfile: the project uses bun.lock
+package-lock.json
