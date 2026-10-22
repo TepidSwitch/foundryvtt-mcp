@@ -45,11 +45,12 @@ describe('buildWorkflow', () => {
       '2d DnD battlemap of a tavern, top-down view, overhead perspective, aerial',
     );
     expect(String(wf['3']?.inputs.text)).toContain('grid');
-    expect(wf['4']?.inputs).toMatchObject({ width: 1024, height: 1536 });
+    expect(wf['4']?.inputs).toMatchObject({ width: 704, height: 1024 });
+    expect(wf['10']?.inputs).toMatchObject({ width: 1024, height: 1536 });
     expect(wf['5']?.inputs).toMatchObject({ seed: 7, steps: 35 });
   });
 
-  it('maps quality to steps, low by default', () => {
+  it('maps quality to steps, medium by default', () => {
     const steps = (q?: 'low' | 'medium' | 'high') =>
       (
         buildWorkflow(
@@ -57,7 +58,45 @@ describe('buildWorkflow', () => {
           MODELS,
         ) as Record<string, { inputs: { steps?: number } }>
       )['5']?.inputs.steps;
-    expect([steps(), steps('medium'), steps('high')]).toEqual([8, 20, 35]);
+    expect([steps('low'), steps(), steps('high')]).toEqual([8, 20, 35]);
+  });
+});
+
+describe('buildWorkflow two-pass', () => {
+  type Wf = Record<string, { class_type: string; inputs: Record<string, unknown> }>;
+  const build = (w: number, h: number, extra = {}) =>
+    buildWorkflow({ prompt: 'x', width: w, height: h, seed: 3, ...extra }, MODELS) as Wf;
+
+  it('keeps a single pass at 1024px or less', () => {
+    const wf = build(1024, 1024);
+    expect(wf['6']?.class_type).toBe('VAEDecode');
+    expect(wf['10']).toBeUndefined();
+  });
+
+  it('renders at native size, upscales the latent, refines at half strength, decodes in tiles', () => {
+    const wf = build(1536, 1536, { quality: 'medium' });
+    expect(wf['4']?.inputs).toMatchObject({ width: 1024, height: 1024 });
+    expect(wf['10']).toMatchObject({
+      class_type: 'LatentUpscale',
+      inputs: { samples: ['5', 0], width: 1536, height: 1536, crop: 'disabled' },
+    });
+    expect(wf['11']?.inputs).toMatchObject({ denoise: 0.5, steps: 10, latent_image: ['10', 0] });
+    expect(wf['6']).toMatchObject({
+      class_type: 'VAEDecodeTiled',
+      inputs: { samples: ['11', 0], tile_size: 512 },
+    });
+  });
+
+  it('keeps the aspect ratio and 64px sides in the base pass', () => {
+    const wf = build(2048, 1024);
+    expect(wf['4']?.inputs).toMatchObject({ width: 1024, height: 512 });
+  });
+
+  it('applies cfg to both passes and appends avoid to the negative prompt', () => {
+    const wf = build(1536, 1536, { cfg: 2, avoid: 'trees, fog' });
+    expect(wf['5']?.inputs.cfg).toBe(2);
+    expect(wf['11']?.inputs.cfg).toBe(2);
+    expect(String(wf['3']?.inputs.text)).toMatch(/artifacts, trees, fog$/);
   });
 });
 

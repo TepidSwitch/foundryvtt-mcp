@@ -16,6 +16,10 @@ export interface MapWorkflowInput {
   height: number;
   seed?: number;
   quality?: 'low' | 'medium' | 'high';
+  /** Guidance scale (the model works best at 2 to 3). */
+  cfg?: number;
+  /** Extra negative-prompt terms, appended to the built-in list. */
+  avoid?: string;
 }
 
 export interface ComfyUIOptions {
@@ -66,45 +70,98 @@ export type MapSize = keyof typeof SIZE_PIXELS;
 
 const STEPS = { low: 8, medium: 20, high: 35 } as const;
 
+/** SDXL is trained at about 1024px; larger direct renders repeat or fragment the layout. */
+const NATIVE_SIDE = 1024;
+const DEFAULT_CFG = 2.5;
+const REFINE_DENOISE = 0.5;
+const BASE_NEGATIVE =
+  'grid, low angle, isometric, oblique, horizon, text, watermark, logo, caption, people, creatures, monsters, blurry, artifacts';
+
+function round64(value: number): number {
+  return Math.max(512, Math.round(value / 64) * 64);
+}
+
+/** Pass-1 size: the target scaled down so its longest side is 1024 (sides stay multiples of 64). */
+export function nativeSize(width: number, height: number): { width: number; height: number } {
+  const longest = Math.max(width, height);
+  if (longest <= NATIVE_SIDE) {
+    return { width, height };
+  }
+  const scale = NATIVE_SIDE / longest;
+  return { width: round64(width * scale), height: round64(height * scale) };
+}
+
 /**
  * The bridge's battlemap workflow: positive prompt carries the model's trigger
  * words, negative prompt keeps out grids, people and perspective.
+ *
+ * Targets above 1024px render in two passes, as the model author recommends:
+ * a native-size base, then a latent upscale and a half-strength refine, decoded
+ * in tiles to stay inside 12 GB of VRAM.
  */
 export function buildWorkflow(
   input: MapWorkflowInput,
   models: { checkpoint: string; vae: string },
 ): Record<string, unknown> {
   const positive = `2d DnD battlemap of ${input.prompt}, top-down view, overhead perspective, aerial`;
-  const negative =
-    'grid, low angle, isometric, oblique, horizon, text, watermark, logo, caption, people, creatures, monsters, blurry, artifacts';
-  const steps = STEPS[input.quality ?? 'low'];
-  return {
+  const negative = input.avoid ? `${BASE_NEGATIVE}, ${input.avoid}` : BASE_NEGATIVE;
+  const steps = STEPS[input.quality ?? 'medium'];
+  const cfg = input.cfg ?? DEFAULT_CFG;
+  const seed = input.seed ?? Math.floor(Math.random() * 1_000_000);
+  const base = nativeSize(input.width, input.height);
+  const twoPass = base.width !== input.width || base.height !== input.height;
+  const sampler = {
+    seed,
+    cfg,
+    sampler_name: 'dpmpp_2m_sde',
+    scheduler: 'karras',
+    model: ['1', 0],
+    positive: ['2', 0],
+    negative: ['3', 0],
+  };
+  const workflow: Record<string, unknown> = {
     '1': { inputs: { ckpt_name: models.checkpoint }, class_type: 'CheckpointLoaderSimple' },
     '2': { inputs: { text: positive, clip: ['1', 1] }, class_type: 'CLIPTextEncode' },
     '3': { inputs: { text: negative, clip: ['1', 1] }, class_type: 'CLIPTextEncode' },
     '4': {
-      inputs: { width: input.width, height: input.height, batch_size: 1 },
+      inputs: { width: base.width, height: base.height, batch_size: 1 },
       class_type: 'EmptyLatentImage',
     },
     '5': {
-      inputs: {
-        seed: input.seed ?? Math.floor(Math.random() * 1_000_000),
-        steps,
-        cfg: 2.5,
-        denoise: 1.0,
-        sampler_name: 'dpmpp_2m_sde',
-        scheduler: 'karras',
-        model: ['1', 0],
-        positive: ['2', 0],
-        negative: ['3', 0],
-        latent_image: ['4', 0],
-      },
+      inputs: { ...sampler, steps, denoise: 1.0, latent_image: ['4', 0] },
       class_type: 'KSampler',
     },
     '9': { inputs: { vae_name: models.vae }, class_type: 'VAELoader' },
-    '6': { inputs: { samples: ['5', 0], vae: ['9', 0] }, class_type: 'VAEDecode' },
     '7': { inputs: { filename_prefix: 'battlemap', images: ['6', 0] }, class_type: 'SaveImage' },
   };
+  if (!twoPass) {
+    workflow['6'] = { inputs: { samples: ['5', 0], vae: ['9', 0] }, class_type: 'VAEDecode' };
+    return workflow;
+  }
+  workflow['10'] = {
+    inputs: {
+      samples: ['5', 0],
+      upscale_method: 'bislerp',
+      width: input.width,
+      height: input.height,
+      crop: 'disabled',
+    },
+    class_type: 'LatentUpscale',
+  };
+  workflow['11'] = {
+    inputs: {
+      ...sampler,
+      steps: Math.max(6, Math.round(steps / 2)),
+      denoise: REFINE_DENOISE,
+      latent_image: ['10', 0],
+    },
+    class_type: 'KSampler',
+  };
+  workflow['6'] = {
+    inputs: { samples: ['11', 0], vae: ['9', 0], tile_size: 512, overlap: 64 },
+    class_type: 'VAEDecodeTiled',
+  };
+  return workflow;
 }
 
 function describeError(error: unknown, secret?: string): string {

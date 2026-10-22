@@ -7,6 +7,7 @@
  * a server restart forgets running jobs (the render itself continues in ComfyUI).
  */
 
+import { readFile } from 'node:fs/promises';
 import type { FoundryClient } from '../foundry/client.js';
 import { slugify } from '../foundry/files.js';
 import { logger } from '../utils/logger.js';
@@ -24,6 +25,10 @@ export interface MapJobParams {
   gridSize?: number;
   quality?: 'low' | 'medium' | 'high';
   seed?: number;
+  cfg?: number;
+  avoid?: string;
+  /** False renders only: the image stays in ComfyUI and no scene is made. */
+  createScene?: boolean;
   /** Id of an existing Scene folder for the new scene. */
   folderId?: string;
 }
@@ -39,6 +44,9 @@ export interface MapJob {
   gridSize: number;
   seed: number;
   quality: 'low' | 'medium' | 'high';
+  createScene: boolean;
+  /** Render-only jobs: the file in ComfyUI's output folder. */
+  outputFile?: string;
   createdAt: number;
   updatedAt: number;
   queuePosition?: number;
@@ -92,8 +100,16 @@ export class MapJobManager {
     const height = clampSide(params.height ?? side);
     // Resolve the seed here (not in buildWorkflow) so it can be stored for regeneration.
     const seed = params.seed ?? Math.floor(Math.random() * 1_000_000);
-    const quality = params.quality ?? 'low';
-    const input: MapWorkflowInput = { prompt: params.prompt, width, height, quality, seed };
+    const quality = params.quality ?? 'medium';
+    const input: MapWorkflowInput = {
+      prompt: params.prompt,
+      width,
+      height,
+      quality,
+      seed,
+      ...(params.cfg !== undefined ? { cfg: params.cfg } : {}),
+      ...(params.avoid ? { avoid: params.avoid } : {}),
+    };
     const promptId = await this.deps.comfy.submit(input);
     this.counter += 1;
     const now = Date.now();
@@ -108,6 +124,7 @@ export class MapJobManager {
       gridSize: Math.max(MIN_GRID, Math.round(params.gridSize ?? 70)),
       seed,
       quality,
+      createScene: params.createScene ?? true,
       createdAt: now,
       updatedAt: now,
       ...(params.folderId ? { folderId: params.folderId } : {}),
@@ -237,7 +254,68 @@ export class MapJobManager {
         this.finish(job, 'failed', 'ComfyUI finished but returned no image');
         return;
       }
+      if (!job.createScene) {
+        job.outputFile = image.filename;
+        this.finish(job, 'done');
+        return;
+      }
       const buffer = await this.deps.comfy.download(image);
+      await this.createSceneFromImage(job, buffer);
+      this.finish(job, 'done');
+    } catch (error) {
+      this.finish(
+        job,
+        'failed',
+        `Rendered, but importing into Foundry failed: ${error instanceof Error ? error.message : String(error)}${job.imagePath ? ` (the image is at ${job.imagePath})` : ''}`,
+      );
+    }
+  }
+
+  /**
+   * Import a PNG you already have (for example a kept draft) as an inactive
+   * scene, without rendering. The path is on the machine running this server.
+   */
+  async importImage(params: {
+    path: string;
+    sceneName: string;
+    gridSize?: number;
+    folderId?: string;
+  }): Promise<MapJob> {
+    const buffer = await readFile(params.path);
+    const size = pngSize(buffer);
+    if (!size) {
+      throw new Error(`${params.path} is not a PNG image`);
+    }
+    this.counter += 1;
+    const now = Date.now();
+    const job: MapJob = {
+      id: `map-${now.toString(36)}-${this.counter}`,
+      promptId: '',
+      status: 'importing',
+      sceneName: params.sceneName,
+      prompt: `imported from ${params.path}`,
+      width: size.width,
+      height: size.height,
+      gridSize: Math.max(MIN_GRID, Math.round(params.gridSize ?? 70)),
+      seed: 0,
+      quality: 'medium',
+      createScene: true,
+      createdAt: now,
+      updatedAt: now,
+      ...(params.folderId ? { folderId: params.folderId } : {}),
+    };
+    this.jobs.set(job.id, job);
+    try {
+      await this.createSceneFromImage(job, buffer);
+      this.finish(job, 'done');
+    } catch (error) {
+      this.finish(job, 'failed', error instanceof Error ? error.message : String(error));
+    }
+    return job;
+  }
+
+  private async createSceneFromImage(job: MapJob, buffer: Buffer): Promise<void> {
+    {
       const real = pngSize(buffer);
       const width = real?.width ?? job.width;
       const height = real?.height ?? job.height;
@@ -275,13 +353,6 @@ export class MapJobManager {
       if (scene?._id) {
         job.sceneId = String(scene._id);
       }
-      this.finish(job, 'done');
-    } catch (error) {
-      this.finish(
-        job,
-        'failed',
-        `Rendered, but importing into Foundry failed: ${error instanceof Error ? error.message : String(error)}${job.imagePath ? ` (the image is at ${job.imagePath})` : ''}`,
-      );
     }
   }
 }

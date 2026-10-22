@@ -6,7 +6,12 @@ import { z } from 'zod';
 import { action, DomainTool } from '../domain.js';
 import { handleGenerateEncounter } from '../handlers/encounter.js';
 import { handleGenerateLoot, handleLookupRule } from '../handlers/generation.js';
-import { handleCancelMap, handleGenerateMap, handleMapStatus } from '../handlers/map-generation.js';
+import {
+  handleCancelMap,
+  handleGenerateMap,
+  handleImportMap,
+  handleMapStatus,
+} from '../handlers/map-generation.js';
 import { handleFindNpc } from '../handlers/npc-search.js';
 
 export const generateTool = new DomainTool({
@@ -111,7 +116,7 @@ export const generateEditTool = new DomainTool({
   actions: {
     map: action({
       description:
-        'Start generating a map. prompt describes the place (it is wrapped with "2d DnD battlemap ... top-down view" for the model), so describe terrain, features and mood, not camera angles. scene_name should be short and evocative, e.g. "Harbor District" or "Moonlit Tavern". Returns a job id immediately.',
+        'Start generating a map. prompt describes the place (it is wrapped with "2d DnD battlemap ... top-down view" for the model), so describe terrain, features and mood, not camera angles. scene_name should be short and evocative, e.g. "Harbor District" or "Moonlit Tavern". Describe terrain and features as tags; naming a building can make the model draw one. Returns a job id immediately.',
       schema: z.object({
         prompt: z
           .string()
@@ -130,14 +135,45 @@ export const generateEditTool = new DomainTool({
         quality: z
           .enum(['low', 'medium', 'high'])
           .optional()
-          .describe('Render steps: low 8 (fast, default), medium 20, high 35'),
+          .describe(
+            'Render steps: low 8 (quick draft), medium 20 (default), high 35. Sizes above 1024px render at 1024 first, then upscale and refine',
+          ),
         seed: z.number().optional().describe('Seed to repeat a result'),
+        cfg: z
+          .number()
+          .min(1)
+          .max(4)
+          .optional()
+          .describe(
+            'Guidance scale, default 2.5. Try 2 for lava, snow or other low-contrast scenes',
+          ),
+        avoid: z
+          .string()
+          .optional()
+          .describe('Extra things to keep out, appended to the built-in negative prompt'),
+        create_scene: z
+          .boolean()
+          .optional()
+          .describe(
+            'false = render only: the image stays in ComfyUI and no scene is made. Use it to try prompts cheaply',
+          ),
         folder: z
           .string()
           .optional()
           .describe('Existing Scene folder (id or name) for the new scene'),
       }),
       run: (a, ctx) => handleGenerateMap(a, ctx),
+    }),
+    import_map: action({
+      description:
+        'Create an inactive scene from a PNG already on the machine running this server (for example a kept draft), without rendering.',
+      schema: z.object({
+        path: z.string().describe('Local path to a PNG'),
+        scene_name: z.string().describe('Name for the new scene'),
+        grid_size: z.number().optional().describe('Pixels per 5 ft square (default 70, min 50)'),
+        folder: z.string().optional().describe('Existing Scene folder (id or name)'),
+      }),
+      run: (a, ctx) => handleImportMap(a, ctx),
     }),
     cancel_map: action({
       description: 'Cancel a map job that is still queued or rendering.',

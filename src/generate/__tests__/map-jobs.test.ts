@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FoundryClient } from '../../foundry/client.js';
 import type { ComfyUIClient } from '../comfyui.js';
@@ -56,7 +59,7 @@ describe('MapJobManager', () => {
     expect(job).toMatchObject({ width: 1024, height: 2048, gridSize: 50, status: 'queued' });
     expect(comfy.submit).toHaveBeenCalledWith({
       prompt: 'p',
-      quality: 'low',
+      quality: 'medium',
       seed: 7,
       width: 1024,
       height: 2048,
@@ -165,6 +168,45 @@ describe('MapJobManager', () => {
     await manager.cancel(live.id);
     expect(comfy.cancel).toHaveBeenCalledWith('prompt-1');
     expect(live.status).toBe('cancelled');
+    manager.dispose();
+  });
+
+  it('renders only, without uploading or creating a scene, when createScene is false', async () => {
+    const { manager, foundry } = setup([{ state: 'complete' }]);
+    const job = await manager.start({ prompt: 'p', sceneName: 'S', createScene: false });
+    await manager.advance(job);
+    expect(job).toMatchObject({ status: 'done', outputFile: 'b.png' });
+    expect(foundry.uploadFile).not.toHaveBeenCalled();
+    expect(foundry.createDocuments).not.toHaveBeenCalled();
+    manager.dispose();
+  });
+
+  it('passes cfg and avoid to the workflow', async () => {
+    const { manager, comfy } = setup([]);
+    await manager.start({ prompt: 'p', sceneName: 'S', seed: 1, cfg: 2, avoid: 'trees' });
+    expect(comfy.submit).toHaveBeenCalledWith(expect.objectContaining({ cfg: 2, avoid: 'trees' }));
+    manager.dispose();
+  });
+
+  it('imports an existing PNG as an inactive scene and rejects other files', async () => {
+    const { manager, foundry, comfy } = setup([]);
+    const dir = mkdtempSync(join(tmpdir(), 'maps-'));
+    const good = join(dir, 'draft.png');
+    writeFileSync(good, png(1024, 768));
+    const job = await manager.importImage({ path: good, sceneName: 'Kept' });
+    expect(job).toMatchObject({
+      status: 'done',
+      width: 1024,
+      height: 768,
+      sceneId: 'SCENEAAAAAAAAAAA',
+    });
+    expect(comfy.submit).not.toHaveBeenCalled();
+    expect(foundry.createDocuments).toHaveBeenCalledWith('Scene', [
+      expect.objectContaining({ name: 'Kept', active: false, width: 1024, height: 768 }),
+    ]);
+    const bad = join(dir, 'x.png');
+    writeFileSync(bad, 'nope');
+    await expect(manager.importImage({ path: bad, sceneName: 'X' })).rejects.toThrow(/not a PNG/);
     manager.dispose();
   });
 });

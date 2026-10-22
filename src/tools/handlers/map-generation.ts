@@ -54,6 +54,9 @@ export async function handleGenerateMap(
     grid_size?: number;
     quality?: 'low' | 'medium' | 'high';
     seed?: number;
+    cfg?: number;
+    avoid?: string;
+    create_scene?: boolean;
     folder?: string;
   },
   ctx: ToolContext,
@@ -83,11 +86,37 @@ export async function handleGenerateMap(
       ...(args.grid_size !== undefined ? { gridSize: args.grid_size } : {}),
       ...(args.quality ? { quality: args.quality } : {}),
       ...(args.seed !== undefined ? { seed: args.seed } : {}),
+      ...(args.cfg !== undefined ? { cfg: args.cfg } : {}),
+      ...(args.avoid ? { avoid: args.avoid } : {}),
+      ...(args.create_scene === false ? { createScene: false } : {}),
       ...(folderId ? { folderId } : {}),
     });
     return text(
-      `🗺️ **Map generation started**${health.gpu ? ` on ${health.gpu}` : ''}\n**Job:** \`${job.id}\`\n**Scene name:** ${job.sceneName}\n**Size:** ${job.width}×${job.height}px, ${job.gridSize}px per 5 ft square (≈${Math.round(job.width / job.gridSize)}×${Math.round(job.height / job.gridSize)} squares)\n\nThe render runs in the background. When it finishes, the image is uploaded and an inactive scene is created automatically. Low quality takes about a minute on a decent GPU, high several minutes. Do not poll: check foundry_generate map_status only if the user asks.`,
+      `🗺️ **Map generation started**${health.gpu ? ` on ${health.gpu}` : ''}\n**Job:** \`${job.id}\`\n**Scene name:** ${job.sceneName}\n**Size:** ${job.width}×${job.height}px, ${job.gridSize}px per 5 ft square (≈${Math.round(job.width / job.gridSize)}×${Math.round(job.height / job.gridSize)} squares)\n\nThe render runs in the background. ${job.createScene ? 'When it finishes, the image is uploaded and an inactive scene is created automatically.' : 'Render only: nothing is uploaded and no scene is created; map_status gives the file name.'} Low quality takes about a minute on a decent GPU, high several minutes. Do not poll: check foundry_generate map_status only if the user asks.`,
     );
+  });
+}
+
+export async function handleImportMap(
+  args: { path: string; scene_name: string; grid_size?: number; folder?: string },
+  ctx: ToolContext,
+) {
+  return withToolError('import map', async () => {
+    if (!ctx.maps) {
+      throw new McpError(ErrorCode.InvalidRequest, NOT_CONFIGURED);
+    }
+    const folderId = args.folder
+      ? resolveFolder(snapshotOf(ctx.foundryClient), args.folder, 'Scene')
+      : ctx.sceneFolder
+        ? await ensureFolder(ctx.foundryClient, ctx.sceneFolder, 'Scene')
+        : undefined;
+    const job = await ctx.maps.importImage({
+      path: args.path,
+      sceneName: args.scene_name,
+      ...(args.grid_size !== undefined ? { gridSize: args.grid_size } : {}),
+      ...(folderId ? { folderId } : {}),
+    });
+    return text(describeJob(job));
   });
 }
 
