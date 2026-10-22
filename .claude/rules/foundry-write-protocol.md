@@ -72,8 +72,18 @@ documented on the web** (the wiki is JS-rendered). The authoritative source is
 the actual app, shipped unminified under `data/container_cache/foundryvtt-<ver>.zip`:
 
 ```
-unzip -o -q data/container_cache/foundryvtt-13.348.zip 'resources/app/client/data/client-backend.mjs' -d /tmp/fvtt
+unzip -o -q ../foundryvtt-harness/data/container_cache/foundryvtt-13.348.zip 'resources/app/client/data/client-backend.mjs' -d /tmp/fvtt
 ```
+
+That cache belongs to the sibling **foundryvtt-harness** checkout, not to this
+repo — run the command from the `foundryvtt-mcp` root. It holds exactly one
+build, `foundryvtt-13.348.zip`, and the version is hardcoded here because it
+names the file that is actually present rather than the version this repo pins.
+
+**Current state of this verification:** the shape implemented in `client.ts` was
+read out of that **v13.348** source. This fork has no Docker test tier; the
+write shape is checked against a live v14 server by the smoke suite
+(`just smoke-live`) instead.
 
 Key files: `client/data/client-backend.mjs` (`#buildRequest`/`#dispatchRequest`),
 `client/helpers/socket-interface.mjs` (`dispatch` = emit-with-ack), and
